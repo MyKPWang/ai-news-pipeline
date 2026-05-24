@@ -1,0 +1,352 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from contextlib import contextmanager
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Iterable
+
+from .models import NewsItem
+
+
+def utc_now_iso() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+class Storage:
+    def __init__(self, database_path: str):
+        self.database_path = Path(database_path)
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        self.init_schema()
+
+    @contextmanager
+    def connect(self):
+        conn = sqlite3.connect(self.database_path)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+    def init_schema(self) -> None:
+        with self.connect() as conn:
+            conn.executescript(
+                """
+                create table if not exists runs (
+                    id integer primary key,
+                    run_date text not null,
+                    started_at text not null,
+                    finished_at text,
+                    status text not null,
+                    total_raw integer default 0,
+                    total_selected integer default 0,
+                    total_published integer default 0,
+                    error_message text
+                );
+
+                create table if not exists raw_items (
+                    id integer primary key,
+                    item_id text not null,
+                    run_id integer not null,
+                    source text,
+                    source_type text,
+                    title text,
+                    desc text,
+                    content text,
+                    html_content text,
+                    url text,
+                    publish_time integer,
+                    time_text text,
+                    cover_url text,
+                    extra_json text,
+                    created_at text not null,
+                    unique(run_id, item_id)
+                );
+
+                create table if not exists processed_items (
+                    id integer primary key,
+                    run_id integer not null,
+                    raw_item_id integer,
+                    item_id text not null,
+                    stage text not null,
+                    category text,
+                    selected integer default 0,
+                    selection_reason text,
+                    core_fact text,
+                    rewritten_title text,
+                    summary text,
+                    risk_flags_json text,
+                    updated_at text not null,
+                    unique(run_id, item_id)
+                );
+
+                create table if not exists filter_events (
+                    id integer primary key,
+                    run_id integer not null,
+                    raw_item_id integer,
+                    item_id text,
+                    stage text not null,
+                    action text not null,
+                    reason_code text,
+                    reason_detail text,
+                    created_at text not null
+                );
+
+                create table if not exists llm_calls (
+                    id integer primary key,
+                    run_id integer not null,
+                    task text not null,
+                    model text,
+                    input_item_ids_json text,
+                    prompt_hash text,
+                    request_preview text,
+                    response_preview text,
+                    response_log_path text,
+                    parsed_json text,
+                    status text not null,
+                    error_message text,
+                    created_at text not null
+                );
+
+                create table if not exists app_logs (
+                    id integer primary key,
+                    run_id integer,
+                    level text not null,
+                    module text,
+                    event text,
+                    message text,
+                    item_id text,
+                    log_path text,
+                    created_at text not null
+                );
+
+                create index if not exists idx_raw_items_run_id on raw_items(run_id);
+                create index if not exists idx_raw_items_item_id on raw_items(item_id);
+                create index if not exists idx_processed_items_run_id on processed_items(run_id);
+                create index if not exists idx_filter_events_run_id on filter_events(run_id);
+                create index if not exists idx_llm_calls_run_id on llm_calls(run_id);
+                create index if not exists idx_app_logs_run_id on app_logs(run_id);
+                """
+            )
+
+    def start_run(self, run_date: str) -> int:
+        with self.connect() as conn:
+            cur = conn.execute(
+                "insert into runs(run_date, started_at, status) values(?, ?, ?)",
+                (run_date, utc_now_iso(), "running"),
+            )
+            return int(cur.lastrowid)
+
+    def finish_run(
+        self,
+        run_id: int,
+        status: str,
+        total_raw: int = 0,
+        total_selected: int = 0,
+        total_published: int = 0,
+        error_message: str = "",
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                update runs
+                set finished_at = ?, status = ?, total_raw = ?, total_selected = ?,
+                    total_published = ?, error_message = ?
+                where id = ?
+                """,
+                (
+                    utc_now_iso(),
+                    status,
+                    total_raw,
+                    total_selected,
+                    total_published,
+                    error_message,
+                    run_id,
+                ),
+            )
+
+    def insert_raw_items(self, run_id: int, items: Iterable[NewsItem]) -> dict[str, int]:
+        mapping: dict[str, int] = {}
+        with self.connect() as conn:
+            for item in items:
+                item.ensure_id()
+                conn.execute(
+                    """
+                    insert or ignore into raw_items(
+                        item_id, run_id, source, source_type, title, desc, content,
+                        html_content, url, publish_time, time_text, cover_url,
+                        extra_json, created_at
+                    )
+                    values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item.id,
+                        run_id,
+                        item.source,
+                        item.source_type,
+                        item.title,
+                        item.desc,
+                        item.content,
+                        item.html_content,
+                        item.url,
+                        item.publish_time,
+                        item.time_text,
+                        item.cover_url,
+                        json.dumps(item.extra or {}, ensure_ascii=False),
+                        utc_now_iso(),
+                    ),
+                )
+            rows = conn.execute(
+                "select id, item_id from raw_items where run_id = ?", (run_id,)
+            ).fetchall()
+            mapping = {str(row["item_id"]): int(row["id"]) for row in rows}
+        return mapping
+
+    def upsert_processed(
+        self,
+        run_id: int,
+        item: NewsItem,
+        stage: str,
+        raw_item_id: int | None = None,
+    ) -> None:
+        item.ensure_id()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into processed_items(
+                    run_id, raw_item_id, item_id, stage, category, selected,
+                    selection_reason, core_fact, rewritten_title, summary,
+                    risk_flags_json, updated_at
+                )
+                values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(run_id, item_id) do update set
+                    raw_item_id = excluded.raw_item_id,
+                    stage = excluded.stage,
+                    category = excluded.category,
+                    selected = excluded.selected,
+                    selection_reason = excluded.selection_reason,
+                    core_fact = excluded.core_fact,
+                    rewritten_title = excluded.rewritten_title,
+                    summary = excluded.summary,
+                    risk_flags_json = excluded.risk_flags_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    run_id,
+                    raw_item_id,
+                    item.id,
+                    stage,
+                    item.category,
+                    1 if item.selected else 0,
+                    item.selection_reason,
+                    item.core_fact,
+                    item.rewritten_title,
+                    item.summary,
+                    json.dumps(item.risk_flags or [], ensure_ascii=False),
+                    utc_now_iso(),
+                ),
+            )
+
+    def add_filter_event(
+        self,
+        run_id: int,
+        stage: str,
+        action: str,
+        item: NewsItem | None = None,
+        raw_item_id: int | None = None,
+        reason_code: str = "",
+        reason_detail: str = "",
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into filter_events(
+                    run_id, raw_item_id, item_id, stage, action, reason_code,
+                    reason_detail, created_at
+                )
+                values(?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    raw_item_id,
+                    item.id if item else None,
+                    stage,
+                    action,
+                    reason_code,
+                    reason_detail,
+                    utc_now_iso(),
+                ),
+            )
+
+    def add_llm_call(
+        self,
+        run_id: int,
+        task: str,
+        model: str,
+        input_item_ids: list[str],
+        prompt_hash: str,
+        request_preview: str,
+        response_preview: str,
+        response_log_path: str,
+        parsed: Any,
+        status: str,
+        error_message: str = "",
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into llm_calls(
+                    run_id, task, model, input_item_ids_json, prompt_hash,
+                    request_preview, response_preview, response_log_path,
+                    parsed_json, status, error_message, created_at
+                )
+                values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    task,
+                    model,
+                    json.dumps(input_item_ids, ensure_ascii=False),
+                    prompt_hash,
+                    request_preview,
+                    response_preview,
+                    response_log_path,
+                    json.dumps(parsed, ensure_ascii=False)[:4000] if parsed is not None else "",
+                    status,
+                    error_message,
+                    utc_now_iso(),
+                ),
+            )
+
+    def add_app_log(
+        self,
+        run_id: int | None,
+        level: str,
+        module: str,
+        event: str,
+        message: str,
+        item_id: str = "",
+        log_path: str = "",
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into app_logs(
+                    run_id, level, module, event, message, item_id, log_path, created_at
+                )
+                values(?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (run_id, level, module, event, message, item_id, log_path, utc_now_iso()),
+            )
+
+    def export_items_json(self, path: str, items: list[NewsItem]) -> str:
+        output = Path(path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with output.open("w", encoding="utf-8") as f:
+            json.dump([item.to_dict() for item in items], f, ensure_ascii=False, indent=2)
+        return str(output)
