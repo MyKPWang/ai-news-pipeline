@@ -99,6 +99,41 @@ class LlmLogicTest(unittest.TestCase):
         text = '```json\n{"selected": [{"index": 1}]}\n```'
         self.assertEqual({"selected": [{"index": 1}]}, parse_json_response(text))
 
+    def test_parse_json_response_from_nested_markdown_json(self):
+        text = """```json
+{
+  "selected": [
+    {
+      "index": 1,
+      "category": "AI资讯",
+      "core_fact": "千问开放第三方接入"
+    }
+  ],
+  "insight": "客户端 AI 生态更新"
+}
+```"""
+        parsed = parse_json_response(text)
+
+        self.assertEqual("AI资讯", parsed["selected"][0]["category"])
+        self.assertEqual("客户端 AI 生态更新", parsed["insight"])
+
+    def test_parse_json_response_from_prefixed_nested_json(self):
+        text = """下面是结果：
+{
+  "items": [
+    {
+      "index": 1,
+      "rewritten_title": "千问开放厂商接入能力",
+      "summary": "千问围绕第三方厂商接入发布指南。",
+      "risk_flags": []
+    }
+  ]
+}
+请查收。"""
+        parsed = parse_json_response(text)
+
+        self.assertEqual("千问开放厂商接入能力", parsed["items"][0]["rewritten_title"])
+
     def test_select_items_maps_batch_index_back_to_news_item(self):
         items = [
             NewsItem(title="普通资讯", desc="不重要"),

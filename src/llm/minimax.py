@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 import time
 from pathlib import Path
 from typing import Any
@@ -222,10 +221,20 @@ def parse_json_response(text: str) -> dict[str, Any]:
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if not match:
+        decoder = json.JSONDecoder()
+        parsed = None
+        for idx, ch in enumerate(text):
+            if ch != "{":
+                continue
+            try:
+                candidate, _end = decoder.raw_decode(text[idx:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                parsed = candidate
+                break
+        if parsed is None:
             raise
-        parsed = json.loads(match.group(0))
     if not isinstance(parsed, dict):
         raise ValueError("LLM JSON response must be an object")
     return parsed
