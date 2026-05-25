@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
+from jinja2 import Environment, FileSystemLoader
+
 from src.aggregator import build_publish_data, render_preview_html
 from src.interceptors.dedup import exact_dedup
 from src.interceptors.keyword_filter import keyword_filter
@@ -258,8 +260,33 @@ class RewriteAndAggregationTest(unittest.TestCase):
 
         self.assertIn("改写后的标题", html)
         self.assertIn("改写后的摘要内容。", html)
+        self.assertIn(';">改写后的标题</h3>', html)
+        self.assertIn(';">来源：测试源</p>', html)
         self.assertNotIn("不要展示的原标题", html)
         self.assertNotIn("不要展示的原摘要", html)
+
+    def test_wechat_publish_template_does_not_indent_title_or_source(self):
+        item = NewsItem(
+            source="测试源",
+            url="https://example.com",
+            category="AI资讯",
+            rewritten_title="改写后的标题",
+            summary="改写后的摘要内容。",
+        )
+        data = build_publish_data([item], {"hot_topics": [], "insight": ""})
+        env = Environment(
+            loader=FileSystemLoader(
+                str(Path(__file__).resolve().parent.parent / "wechat-publish-tool" / "templates")
+            )
+        )
+        template = env.get_template("news.html")
+
+        html = template.render(title="测试文章", **data, sources_str="", author="", date="2026-05-25")
+
+        self.assertIn(';">改写后的标题</h3>', html)
+        self.assertIn(';">来源：测试源</p>', html)
+        self.assertNotIn("\n            改写后的标题", html)
+        self.assertNotIn("\n            来源：测试源", html)
 
 
 class MockPipelineTest(unittest.TestCase):

@@ -23,18 +23,13 @@
     <h2 style="color:#000000;font-weight:bold;font-size:19px;margin-top:20px;margin-bottom:10px;">🏷️ {{ cat.name }}</h2>
 
         {% for item in cat['items'] %}
-        <h3 style="color:#1890ff;font-weight:bold;font-size:17px;margin-top:15px;margin-bottom:5px;">
-            {{ item.rewritten_title }}
-        </h3>
+        <h3 style="color:#1890ff;font-weight:bold;font-size:17px;margin-top:15px;margin-bottom:5px;">{{ item.rewritten_title }}</h3>
 
         {% if item.summary %}
         <p style="color:#666;font-size:15px;margin-bottom:5px;">{{ item.summary }}</p>
         {% endif %}
 
-        <p style="color:#666;font-size:13px;margin-top:0;">
-            {% if item.source %}来源：{{ item.source }}{% endif %}
-            {% if item.time_ago %} | {{ item.time_ago }}{% endif %}
-        </p>
+        <p style="color:#666;font-size:13px;margin-top:0;">{% if item.source %}来源：{{ item.source }}{% endif %}{% if item.time_ago %} | {{ item.time_ago }}{% endif %}</p>
 
         {% if item.link %}
         <p style="color:#666;font-size:13px;margin-top:0;">原文链接：<a href="{{ item.link }}" target="_blank" style="color:#1890ff;text-decoration:underline;">{{ item.link }}</a></p>

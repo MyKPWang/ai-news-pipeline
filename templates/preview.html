@@ -23,10 +23,7 @@
       <article style="border-top:1px solid #ddd;padding-top:14px;margin-top:14px;">
         <h3 style="font-size:18px;margin:0 0 8px;">{{ item.rewritten_title }}</h3>
         <p style="margin:0 0 8px;">{{ item.summary }}</p>
-        <p style="font-size:13px;color:#666;margin:0;">
-          来源：{{ item.source }}
-          {% if item.time_ago %} | {{ item.time_ago }}{% endif %}
-        </p>
+        <p style="font-size:13px;color:#666;margin:0;">来源：{{ item.source }}{% if item.time_ago %} | {{ item.time_ago }}{% endif %}</p>
         {% if item.link %}
         <p style="font-size:13px;margin:4px 0 0;"><a href="{{ item.link }}">{{ item.link }}</a></p>
         {% endif %}
