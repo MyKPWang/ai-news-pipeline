@@ -2,9 +2,44 @@
 
 AI 资讯采集、筛选、改写和微信公众号草稿箱上传工具。
 
+## 项目定位
+
+这是一个资讯二次整合项目，用来把多个来源的 AI 相关资讯统一收集、过滤、去重、筛选、改写，并生成可上传到微信公众号草稿箱的内容。
+
+本项目会直接抓取 3 个门户网站，但**不负责抓取微信公众号原始文章**。微信公众号资讯需要由开发者提前在本机或部署机器上准备一个独立服务，该服务负责定时采集微信公众号文章、缓存数据，并提供 REST API 给本项目读取。
+
+默认部署方式是：
+
+```text
+同一台机器
+├── 微信公众号资讯采集服务  # 预先部署，默认 http://localhost:4000
+└── ai-news-pipeline      # 本项目，读取上面的本机 API
+```
+
+## 前置条件
+
+在 clone 本项目之前，开发者需要准备：
+
+- Python 3 环境。
+- 可访问互联网，用于安装依赖、下载 Playwright Chromium、抓取门户网站、调用 MiniMax。
+- MiniMax API Key，用于全局筛选和逐篇改写。
+- 已部署好的微信公众号资讯采集服务，默认本机地址为 `http://localhost:4000`。
+- 如需上传公众号草稿，还需要微信公众号 `app_id` 和 `app_secret`。
+
+微信公众号资讯采集服务至少需要提供这些接口：
+
+```text
+POST /api/v1/wx/auth/token
+GET  /api/v1/wx/mps
+GET  /api/v1/wx/articles?mp_id={mp_id}&page=1&page_size=20
+GET  /api/v1/wx/articles/{article_id}  # 可选，只有需要正文详情时使用
+```
+
+如果没有部署微信公众号资讯采集服务，本项目仍可运行门户网站采集和相关测试，但完整资讯流会缺少微信公众号来源。
+
 ## 功能范围
 
-- 从电脑 A 本机 Docker 服务读取微信公众号缓存文章。
+- 从本机已部署的微信公众号资讯采集服务读取缓存文章。
 - 使用 Playwright 采集虎嗅、量子位、AIBase 列表页资讯。
 - 统一写入 SQLite。
 - 只保留最近 24 小时内资讯。
@@ -14,7 +49,7 @@ AI 资讯采集、筛选、改写和微信公众号草稿箱上传工具。
 
 ## 安装
 
-电脑 A 使用全局 Python 环境运行，不要求创建虚拟环境：
+部署机器使用全局 Python 环境运行，不要求创建虚拟环境：
 
 ```bash
 python3 -m pip install -r requirements.txt
@@ -28,6 +63,7 @@ cp secrets.example.yaml secrets.yaml
 ## 配置
 
 `config.yaml` 存放非敏感配置，默认 Docker API 地址是：
+这里的 `docker_api.base_url` 指向你预先部署好的微信公众号资讯采集服务：
 
 ```yaml
 docker_api:
