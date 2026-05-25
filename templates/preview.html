@@ -21,11 +21,11 @@
     <h2 style="font-size:20px;margin:12px 0 6px;">{{ category.name }}</h2>
       {% for item in category["items"] %}
       <article style="border-top:1px solid #ddd;padding-top:8px;margin-top:8px;">
-        <h3 style="font-size:18px;margin:0 0 4px;">{{ item.rewritten_title|trim }}</h3>
-        <p style="margin:0 0 4px;">{{ item.summary|trim }}</p>
-        <p style="font-size:13px;color:#666;margin:0;">来源：{{ item.source|trim }}{% if item.time_ago %} | {{ item.time_ago|trim }}{% endif %}</p>
+        <div style="font-size:18px;font-weight:bold;margin:0;padding:0;">{{ item.rewritten_title|trim }}</div>
+        <div style="margin:0;padding:0;">{{ item.summary|trim }}</div>
+        <div style="font-size:13px;color:#666;margin:0;padding:0;">来源：{{ item.source|trim }}{% if item.time_ago %} | {{ item.time_ago|trim }}{% endif %}</div>
         {% if item.link %}
-        <p style="font-size:13px;margin:0;"><a href="{{ item.link }}">{{ item.link|trim }}</a></p>
+        <div style="font-size:13px;margin:0;padding:0;"><a href="{{ item.link }}">{{ item.link|trim }}</a></div>
         {% endif %}
       </article>
       {% endfor %}

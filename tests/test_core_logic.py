@@ -261,8 +261,8 @@ class RewriteAndAggregationTest(unittest.TestCase):
 
         self.assertIn("改写后的标题", html)
         self.assertIn("改写后的摘要内容。", html)
-        self.assertIn(';">改写后的标题</h3>', html)
-        self.assertIn(';">来源：测试源 | 1小时前</p>', html)
+        self.assertIn(';">改写后的标题</div>', html)
+        self.assertIn(';">来源：测试源 | 1小时前</div>', html)
         self.assertNotIn("来源：测试源  |", html)
         self.assertNotIn("不要展示的原标题", html)
         self.assertNotIn("不要展示的原摘要", html)
@@ -280,17 +280,22 @@ class RewriteAndAggregationTest(unittest.TestCase):
         env = Environment(
             loader=FileSystemLoader(
                 str(Path(__file__).resolve().parent.parent / "wechat-publish-tool" / "templates")
-            )
+            ),
+            trim_blocks=True,
+            lstrip_blocks=True,
         )
         template = env.get_template("news.html")
 
         html = template.render(title="测试文章", **data, sources_str="", author="", date="2026-05-25")
 
-        self.assertIn(';">改写后的标题</h3>', html)
-        self.assertIn(';">来源：测试源 | 1小时前</p>', html)
+        self.assertIn(';">改写后的标题</div>', html)
+        self.assertIn(';">改写后的摘要内容。</div>', html)
+        self.assertIn(';">来源：测试源 | 1小时前</div>', html)
+        self.assertIn(';">原文链接：<a href="https://example.com"', html)
         self.assertNotIn("来源：测试源  |", html)
-        self.assertNotIn("</h3>\n\n", html)
-        self.assertNotIn("</p>\n\n", html)
+        self.assertNotIn("<h3", html)
+        self.assertNotIn("<p style=\"color:#666", html)
+        self.assertNotIn("</div>\n\n", html)
         self.assertNotIn("\n            改写后的标题", html)
         self.assertNotIn("\n            来源：测试源", html)
 
