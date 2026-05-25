@@ -84,6 +84,18 @@ class LlmLogicTest(unittest.TestCase):
         self.assertIn("删除不确定内容", rewrite_prompt)
         self.assertIn("不要输出 possible_copying", rewrite_prompt)
 
+    def test_rewrite_prompt_requires_fact_precision_and_restraint(self):
+        item = NewsItem(
+            title="DeepSeek-V4-Pro API永久降价",
+            desc="API 将于6月1日起调整为原价的四分之一。",
+        )
+        prompt = build_rewrite_prompt([item], max_content_chars=200)
+
+        self.assertIn("四分之一", prompt)
+        self.assertIn("绝不能写成“四折”", prompt)
+        self.assertIn("未来语气", prompt)
+        self.assertIn("不得替原文拔高评价", prompt)
+
     def test_selection_prompt_includes_source_priority_and_duplicate_policy(self):
         wechat = NewsItem(title="系统级 AI 能力发布", desc="官方公众号发布。", source_type="wechat_mp")
         portal = NewsItem(title="系统级 AI 能力发布", desc="网页报道同一事件。", source_type="portal")
