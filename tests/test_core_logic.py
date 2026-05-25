@@ -95,6 +95,9 @@ class LlmLogicTest(unittest.TestCase):
         self.assertIn("绝不能写成“四折”", prompt)
         self.assertIn("未来语气", prompt)
         self.assertIn("不得替原文拔高评价", prompt)
+        self.assertIn("OS27", prompt)
+        self.assertIn("苹果下一代系统", prompt)
+        self.assertIn("除非素材明确写的是“iOS 27”", prompt)
 
     def test_selection_prompt_includes_source_priority_and_duplicate_policy(self):
         wechat = NewsItem(title="系统级 AI 能力发布", desc="官方公众号发布。", source_type="wechat_mp")
