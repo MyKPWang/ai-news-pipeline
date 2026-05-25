@@ -1024,7 +1024,10 @@ minimax_api:
   selection_temperature: 0.2
   rewrite_temperature: 0.4
   selection_batch_size: 40
-  rewrite_batch_size: 15
+  rewrite_batch_size: 4
+  rewrite_batch_size_cap: 4
+  selection_max_tokens: 5000
+  rewrite_max_tokens: 5000
   use_content_if_available: true
   fetch_article_detail_for_rewrite: false
   max_content_chars: 2000
@@ -1033,6 +1036,7 @@ minimax_api:
 bge_model:
   path: ""     # 优先使用现成模型路径，空白则下载
   threshold: 0.85
+  force_gc_after_run: true
 
 # 运行配置
 runtime:

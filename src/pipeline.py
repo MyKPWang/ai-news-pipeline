@@ -82,7 +82,12 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         for item in selected_items:
             storage.upsert_processed(run_id, item, "selected", raw_id_map.get(item.id))
 
-        rewritten = llm.rewrite_items(selected_items)
+        rewritten = llm.rewrite_items(
+            selected_items,
+            on_item_rewritten=lambda item: storage.upsert_processed(
+                run_id, item, "rewritten", raw_id_map.get(item.id)
+            ),
+        )
         rewritten_ids = {item.id for item in rewritten}
         for item in selected_items:
             if item.id not in rewritten_ids:

@@ -276,10 +276,12 @@ class MockPipelineTest(unittest.TestCase):
                 selected[0].selection_reason = "客户端+AI方向"
                 return selected, {"hot_topics": ["客户端 AI"], "insight": "客户端 AI 生态更新"}
 
-            def rewrite_items(self, items):
+            def rewrite_items(self, items, on_item_rewritten=None):
                 items[0].rewritten_title = "千问开放厂商接入能力"
                 items[0].summary = "千问围绕第三方厂商接入发布指南，显示超级 App 与 AI 生态正在继续扩展。"
                 items[0].risk_flags = []
+                if on_item_rewritten:
+                    on_item_rewritten(items[0])
                 return items
 
         with tempfile.TemporaryDirectory() as tmp:

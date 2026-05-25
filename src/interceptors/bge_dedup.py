@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import gc
 from dataclasses import dataclass
 
 from ..models import NewsItem
@@ -20,6 +21,8 @@ def bge_dedup(items: list[NewsItem], config: dict) -> BgeDedupResult:
     if len(items) <= 1 or not config.get("bge_model", {}).get("enabled", True):
         return BgeDedupResult(kept=items, removed=[], used_bge=False)
 
+    model = None
+    embeddings = None
     try:
         os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
         import numpy as np
@@ -59,3 +62,20 @@ def bge_dedup(items: list[NewsItem], config: dict) -> BgeDedupResult:
     except Exception as exc:
         logger.warning("BGE dedup skipped: %s", exc)
         return BgeDedupResult(kept=items, removed=[], used_bge=False)
+    finally:
+        if config.get("bge_model", {}).get("force_gc_after_run", True):
+            try:
+                del embeddings
+                del model
+            except Exception:
+                pass
+            gc.collect()
+            try:
+                import torch
+
+                if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+                    torch.mps.empty_cache()
+                if hasattr(torch, "cuda") and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass

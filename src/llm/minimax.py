@@ -41,7 +41,7 @@ class MiniMaxClient:
             prompt=prompt,
             item_ids=[item.id for item in items],
             temperature=float(self.api_config.get("selection_temperature", 0.2)),
-            max_tokens=6000,
+            max_tokens=int(self.api_config.get("selection_max_tokens", 5000)),
         )
         selected_rows = parsed.get("selected", [])
         index_map = {idx: item for idx, item in enumerate(items, 1)}
@@ -69,21 +69,31 @@ class MiniMaxClient:
 
         return selected, parsed
 
-    def rewrite_items(self, items: list[NewsItem]) -> list[NewsItem]:
+    def rewrite_items(self, items: list[NewsItem], on_item_rewritten=None) -> list[NewsItem]:
         if not items:
             return []
-        batch_size = int(self.api_config.get("rewrite_batch_size", 10))
+        batch_size = int(self.api_config.get("rewrite_batch_size", 4))
+        batch_size_cap = int(self.api_config.get("rewrite_batch_size_cap", 4))
+        batch_size = max(1, min(batch_size, batch_size_cap))
         max_content_chars = int(self.api_config.get("max_content_chars", 2000))
         rewritten: list[NewsItem] = []
         for start in range(0, len(items), batch_size):
             batch = items[start : start + batch_size]
+            batch_no = start // batch_size + 1
+            total_batches = (len(items) + batch_size - 1) // batch_size
+            logger.info(
+                "LLM rewrite batch %s/%s start, items=%s",
+                batch_no,
+                total_batches,
+                len(batch),
+            )
             prompt = build_rewrite_prompt(batch, max_content_chars=max_content_chars)
             parsed = self._call_json(
                 task="rewrite",
                 prompt=prompt,
                 item_ids=[item.id for item in batch],
                 temperature=float(self.api_config.get("rewrite_temperature", 0.4)),
-                max_tokens=9000,
+                max_tokens=int(self.api_config.get("rewrite_max_tokens", 5000)),
             )
             rows = parsed.get("items", [])
             index_map = {idx: item for idx, item in enumerate(batch, 1)}
@@ -101,6 +111,14 @@ class MiniMaxClient:
                 facts = row.get("facts") or []
                 item.extra["rewrite_facts"] = facts
                 rewritten.append(item)
+                if on_item_rewritten:
+                    on_item_rewritten(item)
+            logger.info(
+                "LLM rewrite batch %s/%s done, parsed_items=%s",
+                batch_no,
+                total_batches,
+                len(rows),
+            )
             if start + batch_size < len(items):
                 time.sleep(1)
         return rewritten
@@ -128,8 +146,22 @@ class MiniMaxClient:
         for attempt in range(int(self.api_config.get("max_retries", 3))):
             raw_response = ""
             try:
+                logger.info(
+                    "LLM call start task=%s attempt=%s items=%s prompt_chars=%s max_tokens=%s",
+                    task,
+                    attempt + 1,
+                    len(item_ids),
+                    len(prompt),
+                    max_tokens,
+                )
                 raw_response = self._post(payload)
                 parsed = parse_json_response(raw_response)
+                logger.info(
+                    "LLM call success task=%s attempt=%s response_chars=%s",
+                    task,
+                    attempt + 1,
+                    len(raw_response),
+                )
                 self._write_llm_log(task, prompt_hash, payload, raw_response, parsed, "success")
                 self.storage.add_llm_call(
                     run_id=self.run_id,
@@ -146,6 +178,12 @@ class MiniMaxClient:
                 return parsed
             except Exception as exc:
                 last_error = str(exc)
+                logger.warning(
+                    "LLM call failed task=%s attempt=%s error=%s",
+                    task,
+                    attempt + 1,
+                    last_error,
+                )
                 self._write_llm_log(task, prompt_hash, payload, raw_response, None, "failed", last_error)
                 if attempt < int(self.api_config.get("max_retries", 3)) - 1:
                     time.sleep(2**attempt)

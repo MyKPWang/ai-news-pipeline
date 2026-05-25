@@ -51,7 +51,10 @@ minimax_api:
   selection_temperature: 0.2
   rewrite_temperature: 0.4
   selection_batch_size: 40
-  rewrite_batch_size: 10
+  rewrite_batch_size: 4
+  rewrite_batch_size_cap: 4
+  selection_max_tokens: 5000
+  rewrite_max_tokens: 5000
   use_content_if_available: true
   fetch_article_detail_for_rewrite: false
   max_content_chars: 2000
@@ -61,6 +64,7 @@ bge_model:
   name: "BAAI/bge-small-zh-v1.5"
   threshold: 0.85
   enabled: true
+  force_gc_after_run: true
 
 runtime:
   lookback_hours: 24
