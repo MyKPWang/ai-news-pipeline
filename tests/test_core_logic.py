@@ -81,6 +81,8 @@ class LlmLogicTest(unittest.TestCase):
         self.assertIn("未经证实", global_prompt)
         self.assertIn("默认不选", global_prompt)
         self.assertIn("unverified_rumor", rewrite_prompt)
+        self.assertIn("删除不确定内容", rewrite_prompt)
+        self.assertIn("不要输出 possible_copying", rewrite_prompt)
 
     def test_selection_prompt_includes_source_priority_and_duplicate_policy(self):
         wechat = NewsItem(title="系统级 AI 能力发布", desc="官方公众号发布。", source_type="wechat_mp")
@@ -189,10 +191,10 @@ class RewriteAndAggregationTest(unittest.TestCase):
         )
         missing = NewsItem(title="原文标题", desc="摘要", rewritten_title="", summary="")
         copied = NewsItem(
-            title="苹果发布系统级人工智能功能",
-            desc="该功能会进入多个系统应用",
-            rewritten_title="苹果发布系统级人工智能功能",
-            summary="该功能会进入多个系统应用，并覆盖多个使用场景。",
+            title="苹果发布系统级人工智能功能并覆盖多个系统应用",
+            desc="该功能会进入多个系统应用并覆盖多个使用场景",
+            rewritten_title="苹果发布系统级人工智能功能并覆盖多个系统应用",
+            summary="该功能会进入多个系统应用并覆盖多个使用场景。",
         )
 
         publishable, review = validate_rewritten([ok, missing, copied])
@@ -203,6 +205,25 @@ class RewriteAndAggregationTest(unittest.TestCase):
         self.assertIn("missing_summary", missing.risk_flags)
         self.assertIn(copied, review)
         self.assertIn("possible_copying", copied.risk_flags)
+
+    def test_copy_check_allows_required_factual_terms(self):
+        item = NewsItem(
+            title="清华联合腾讯混元斩获MLSys2026MoE推理挑战赛冠军，NPU推理提速4.1倍",
+            desc=(
+                "清华大学存储实验室与腾讯混元AI Infra团队在MLSys2026 MoE模型推理优化挑战赛中获全球冠军。"
+                "针对万亿参数混合专家架构在异构NPU上的推理瓶颈，联合团队设计了全链路优化方案。"
+            ),
+            rewritten_title="清华与腾讯混元团队在MLSys2026 MoE挑战赛夺冠",
+            summary=(
+                "清华大学存储实验室与腾讯混元AI Infra团队共同参加MLSys2026 MoE推理优化挑战赛并获全球冠军。"
+                "联合团队开发了E-Shard、PSUM三维张量批量读出、GEMV路径等优化技术，评测显示NPU推理速度提升4.1倍。"
+            ),
+        )
+
+        publishable, review = validate_rewritten([item])
+
+        self.assertEqual([item], publishable)
+        self.assertEqual([], review)
 
     def test_preview_html_does_not_fallback_to_original_title_or_desc(self):
         item = NewsItem(

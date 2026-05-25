@@ -813,8 +813,8 @@ JSON 格式：
 6. 摘要正文控制在 120-220 字；如果只有标题和短摘要可用，控制在 80-160 字，避免扩写和脑补。
 7. 摘要必须改变原文表达方式和叙述顺序，不得沿用原摘要或原文正文的段落结构。
 8. 每条资讯必须独立处理，不得把多条资讯合并、串写或混淆事实。
-9. 不得连续复用原文中 10 个以上中文字符组成的表达；专有名词、公司名、产品名除外。
-10. 如果素材信息不足，只写已知事实，并在 risk_flags 中标记 "insufficient_source"。
+9. 不得连续复用原文中的完整句子或长表达；专有名词、机构名、产品名、模型名、会议名、论文名、技术术语、公开数字可以保留。
+10. 如果素材信息不足，只写已知事实，并在 risk_flags 中标记 "insufficient_material"。
 11. 保留关键专有名词，如 OpenAI、Claude、DeepSeek、通义千问、Agent、GitHub 等。
 12. 输出只允许 JSON，不要 markdown，不要解释。
 
@@ -823,7 +823,8 @@ JSON 格式：
 2. 如果 core_fact 与原标题或原摘要冲突，以原标题和原摘要为准；如果冲突无法判断，在 risk_flags 中标记 "fact_conflict"。
 3. 再基于 facts 写 rewritten_title。
 4. 再基于 facts 写 summary。
-5. 如果无法安全改写，仍输出该 index，但 risk_flags 标记原因，rewritten_title 和 summary 可以留空。
+5. 如果素材同时包含已确认事实和未经证实内容，优先删除未经证实内容，只改写已确认事实；只有当核心价值依赖传闻时才标记 `unverified_rumor`。
+6. 如果无法安全改写，仍输出该 index，但 risk_flags 标记原因，rewritten_title 和 summary 可以留空。
 
 JSON 格式：
 {
@@ -854,7 +855,7 @@ JSON 格式：
 - `rewritten_title` 为空或超过 35 字时，该文章不得自动发布，进入人工检查列表并记录 warning。
 - `rewritten_title` 出现夸张、悬念、营销化表达时，该文章不得自动发布，进入人工检查列表并记录 warning。
 - `summary` 少于 60 字或为空时，该文章不得自动发布，进入人工检查列表。
-- 如果 `rewritten_title` 或 `summary` 连续复用原文中 10 个以上中文字符组成的表达，且不是专有名词、公司名、产品名，该文章进入人工检查列表。
+- 如果 `rewritten_title` 或 `summary` 连续复用原文中配置阈值以上的长表达，且不是专有名词、机构名、产品名、模型名、会议名、论文名、技术术语或公开数字，该文章进入人工检查列表。默认阈值为 `output.copy_check_threshold: 20`。
 - `facts` 为空时，该文章不得自动发布，进入人工检查列表。
 - `risk_flags` 非空时，该文章不得自动发布，进入人工检查列表。
 - `items[].index` 不在当前批次输入序号中则丢弃。
@@ -866,13 +867,14 @@ JSON 格式：
 
 | 标记 | 含义 |
 |------|------|
-| `insufficient_source` | 素材不足，无法安全摘要 |
-| `possible_copying` | 难以避免与原文相似 |
+| `insufficient_material` | 素材不足，无法安全摘要 |
 | `unverified_rumor` | 核心事实属于未经证实的传闻、疑似爆料或捕风捉影消息 |
 | `unclear_fact` | 关键事实不清楚 |
 | `fact_conflict` | core_fact 与标题/摘要存在冲突 |
 | `non_ai_content` | 内容与 AI 关系不足 |
 | `needs_human_review` | 其它需要人工检查的情况 |
+
+`possible_copying` 不要求 LLM 输出，由程序在改写后进行二次检测并追加。
 
 #### 4.2.5 分类标签
 | 分类 | 说明 |
@@ -1059,6 +1061,7 @@ output:
   stop_publish_on_llm_error: true
   stop_publish_on_rewrite_warning: true
   require_rewritten_title_and_summary: true
+  copy_check_threshold: 20
   max_review_ratio_for_publish: 0.3
   min_publishable_items: 3
 ```

@@ -95,7 +95,10 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
             stage = "rewritten" if item.id in rewritten_ids else "review"
             storage.upsert_processed(run_id, item, stage, raw_id_map.get(item.id))
 
-        publishable_items, rewrite_review = validate_rewritten(selected_items)
+        publishable_items, rewrite_review = validate_rewritten(
+            selected_items,
+            copy_threshold=int(config.get("output", {}).get("copy_check_threshold", 20)),
+        )
         review_items.extend(rewrite_review)
         for item in rewrite_review:
             storage.upsert_processed(run_id, item, "review", raw_id_map.get(item.id))
@@ -203,7 +206,7 @@ def quality_filter(items: list[NewsItem]) -> tuple[list[NewsItem], list[tuple[Ne
     return kept, review
 
 
-def validate_rewritten(items: list[NewsItem]) -> tuple[list[NewsItem], list[NewsItem]]:
+def validate_rewritten(items: list[NewsItem], copy_threshold: int = 20) -> tuple[list[NewsItem], list[NewsItem]]:
     publishable: list[NewsItem] = []
     review: list[NewsItem] = []
     for item in items:
@@ -211,7 +214,7 @@ def validate_rewritten(items: list[NewsItem]) -> tuple[list[NewsItem], list[News
             item.risk_flags.append("missing_rewritten_title")
         if not item.summary.strip():
             item.risk_flags.append("missing_summary")
-        if has_long_copy(item):
+        if has_long_copy(item, threshold=copy_threshold):
             item.risk_flags.append("possible_copying")
         if item.risk_flags:
             review.append(item)

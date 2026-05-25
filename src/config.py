@@ -81,6 +81,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "stop_publish_on_llm_error": True,
         "stop_publish_on_rewrite_warning": True,
         "require_rewritten_title_and_summary": True,
+        "copy_check_threshold": 20,
         "max_review_ratio_for_publish": 0.3,
         "min_publishable_items": 3,
     },
