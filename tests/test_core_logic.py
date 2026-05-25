@@ -248,6 +248,7 @@ class RewriteAndAggregationTest(unittest.TestCase):
             desc="不要展示的原摘要",
             source="测试源",
             url="https://example.com",
+            time_text="1小时前",
             category="AI资讯",
             rewritten_title="改写后的标题",
             summary="改写后的摘要内容。",
@@ -261,7 +262,8 @@ class RewriteAndAggregationTest(unittest.TestCase):
         self.assertIn("改写后的标题", html)
         self.assertIn("改写后的摘要内容。", html)
         self.assertIn(';">改写后的标题</h3>', html)
-        self.assertIn(';">来源：测试源</p>', html)
+        self.assertIn(';">来源：测试源 | 1小时前</p>', html)
+        self.assertNotIn("来源：测试源  |", html)
         self.assertNotIn("不要展示的原标题", html)
         self.assertNotIn("不要展示的原摘要", html)
 
@@ -269,6 +271,7 @@ class RewriteAndAggregationTest(unittest.TestCase):
         item = NewsItem(
             source="测试源",
             url="https://example.com",
+            time_text="1小时前",
             category="AI资讯",
             rewritten_title="改写后的标题",
             summary="改写后的摘要内容。",
@@ -284,7 +287,10 @@ class RewriteAndAggregationTest(unittest.TestCase):
         html = template.render(title="测试文章", **data, sources_str="", author="", date="2026-05-25")
 
         self.assertIn(';">改写后的标题</h3>', html)
-        self.assertIn(';">来源：测试源</p>', html)
+        self.assertIn(';">来源：测试源 | 1小时前</p>', html)
+        self.assertNotIn("来源：测试源  |", html)
+        self.assertNotIn("</h3>\n\n", html)
+        self.assertNotIn("</p>\n\n", html)
         self.assertNotIn("\n            改写后的标题", html)
         self.assertNotIn("\n            来源：测试源", html)
 

@@ -32,6 +32,8 @@ def render_preview_html(data: dict, title: str, output_dir: str = "output") -> s
     env = Environment(
         loader=FileSystemLoader(str(Path(__file__).resolve().parent.parent / "templates")),
         autoescape=select_autoescape(["html"]),
+        trim_blocks=True,
+        lstrip_blocks=True,
     )
     template = env.get_template("preview.html")
     html = template.render(title=title, **data)

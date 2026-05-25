@@ -75,7 +75,11 @@ def generate_html(data: dict, title: str, sources: List[str] = None, author: str
     from jinja2 import Environment, FileSystemLoader
 
     template_dir = Path(__file__).parent / "templates"
-    env = Environment(loader=FileSystemLoader(str(template_dir)))
+    env = Environment(
+        loader=FileSystemLoader(str(template_dir)),
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
     template = env.get_template("news.html")
 
     # 准备数据

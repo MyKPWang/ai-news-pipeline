@@ -6,11 +6,11 @@
   <title>{{ title }}</title>
 </head>
 <body>
-  <main style="max-width:760px;margin:0 auto;padding:24px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.7;color:#222;">
-    <h1 style="font-size:24px;margin:0 0 20px;">{{ title }}</h1>
+  <main style="max-width:760px;margin:0 auto;padding:18px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;line-height:1.6;color:#222;">
+    <h1 style="font-size:24px;margin:0 0 14px;">{{ title }}</h1>
     {% if hot_items %}
-    <h2 style="font-size:18px;margin-top:24px;">今日热点</h2>
-    <ul>
+    <h2 style="font-size:18px;margin:0 0 6px;">今日热点</h2>
+    <ul style="margin:0 0 10px;">
       {% for item in hot_items %}
       <li>{{ item }}</li>
       {% endfor %}
@@ -18,22 +18,22 @@
     {% endif %}
 
     {% for category in categories %}
-    <h2 style="font-size:20px;margin-top:28px;">{{ category.name }}</h2>
+    <h2 style="font-size:20px;margin:12px 0 6px;">{{ category.name }}</h2>
       {% for item in category["items"] %}
-      <article style="border-top:1px solid #ddd;padding-top:14px;margin-top:14px;">
-        <h3 style="font-size:18px;margin:0 0 8px;">{{ item.rewritten_title }}</h3>
-        <p style="margin:0 0 8px;">{{ item.summary }}</p>
-        <p style="font-size:13px;color:#666;margin:0;">来源：{{ item.source }}{% if item.time_ago %} | {{ item.time_ago }}{% endif %}</p>
+      <article style="border-top:1px solid #ddd;padding-top:8px;margin-top:8px;">
+        <h3 style="font-size:18px;margin:0 0 4px;">{{ item.rewritten_title|trim }}</h3>
+        <p style="margin:0 0 4px;">{{ item.summary|trim }}</p>
+        <p style="font-size:13px;color:#666;margin:0;">来源：{{ item.source|trim }}{% if item.time_ago %} | {{ item.time_ago|trim }}{% endif %}</p>
         {% if item.link %}
-        <p style="font-size:13px;margin:4px 0 0;"><a href="{{ item.link }}">{{ item.link }}</a></p>
+        <p style="font-size:13px;margin:0;"><a href="{{ item.link }}">{{ item.link|trim }}</a></p>
         {% endif %}
       </article>
       {% endfor %}
     {% endfor %}
 
     {% if insight %}
-    <h2 style="font-size:18px;margin-top:28px;">今日观察</h2>
-    <p>{{ insight }}</p>
+    <h2 style="font-size:18px;margin:12px 0 6px;">今日观察</h2>
+    <p style="margin:0;">{{ insight|trim }}</p>
     {% endif %}
   </main>
 </body>
