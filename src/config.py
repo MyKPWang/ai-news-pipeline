@@ -65,6 +65,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "runtime": {
         "lookback_hours": 24,
         "default_no_publish": False,
+        "reuse_rewrite_cache": True,
     },
     "wechat_publish": {
         "thumb_media_id": "",

@@ -383,6 +383,76 @@ class MockPipelineTest(unittest.TestCase):
             self.assertEqual("千问开放厂商接入能力", result.publishable_items[0].rewritten_title)
             self.assertFalse(result.published)
 
+    def test_pipeline_reuses_rewrite_cache_on_retry(self):
+        now_ts = int(datetime.now().timestamp())
+
+        def make_source_items():
+            items = [
+                NewsItem(
+                    title="千问开放第三方厂商接入指南",
+                    desc="千问面向第三方厂商开放智能体接入能力",
+                    source="测试公众号",
+                    source_type="wechat_mp",
+                    url="https://example.com/qwen",
+                    publish_time=now_ts,
+                )
+            ]
+            for item in items:
+                item.ensure_id()
+            return items
+
+        class FakeMiniMaxClient:
+            rewrite_calls = 0
+
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def select_items(self, items):
+                selected = [items[0]]
+                selected[0].selected = True
+                selected[0].category = "AI资讯"
+                selected[0].core_fact = "千问开放第三方厂商接入指南"
+                selected[0].selection_reason = "客户端+AI方向"
+                return selected, {"hot_topics": [], "insight": ""}
+
+            def rewrite_items(self, items, on_item_rewritten=None):
+                type(self).rewrite_calls += 1
+                for item in items:
+                    item.rewritten_title = "千问开放厂商接入能力"
+                    item.summary = "千问围绕第三方厂商接入发布指南，显示超级 App 与 AI 生态继续扩展。"
+                    item.risk_flags = []
+                    if on_item_rewritten:
+                        on_item_rewritten(item)
+                return items
+
+        with tempfile.TemporaryDirectory() as tmp:
+            config = {
+                "output": {
+                    "database_path": str(Path(tmp) / "news.db"),
+                    "save_raw_json": False,
+                    "save_processed_json": False,
+                    "min_publishable_items": 1,
+                    "max_review_ratio_for_publish": 0.3,
+                },
+                "runtime": {
+                    "lookback_hours": 24,
+                    "default_no_publish": True,
+                    "reuse_rewrite_cache": True,
+                },
+                "bge_model": {"enabled": False},
+                "wechat_publish": {"auto_publish": False},
+            }
+
+            with patch("src.pipeline.collect_all_sources", side_effect=lambda *_args: make_source_items()), patch(
+                "src.pipeline.MiniMaxClient", FakeMiniMaxClient
+            ), patch("src.pipeline.render_preview_html", return_value=str(Path(tmp) / "preview.html")):
+                first = run_pipeline(config, no_publish=True)
+                second = run_pipeline(config, no_publish=True)
+
+        self.assertEqual(1, FakeMiniMaxClient.rewrite_calls)
+        self.assertEqual("千问开放厂商接入能力", first.publishable_items[0].rewritten_title)
+        self.assertEqual("千问开放厂商接入能力", second.publishable_items[0].rewritten_title)
+
 
 if __name__ == "__main__":
     unittest.main()

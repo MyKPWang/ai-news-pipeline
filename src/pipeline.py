@@ -82,12 +82,49 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         for item in selected_items:
             storage.upsert_processed(run_id, item, "selected", raw_id_map.get(item.id))
 
-        rewritten = llm.rewrite_items(
-            selected_items,
-            on_item_rewritten=lambda item: storage.upsert_processed(
-                run_id, item, "rewritten", raw_id_map.get(item.id)
-            ),
-        )
+        cached_rewritten: list[NewsItem] = []
+        items_to_rewrite = selected_items
+        if config.get("runtime", {}).get("reuse_rewrite_cache", True):
+            cached_by_id = storage.get_latest_rewritten_items(item.id for item in selected_items)
+            items_to_rewrite = []
+            for item in selected_items:
+                cached = cached_by_id.get(item.id)
+                if cached:
+                    item.rewritten_title = str(cached.get("rewritten_title") or "").strip()
+                    item.summary = str(cached.get("summary") or "").strip()
+                    item.risk_flags = [str(flag) for flag in cached.get("risk_flags", [])]
+                    cached_rewritten.append(item)
+                    storage.upsert_processed(run_id, item, "rewritten", raw_id_map.get(item.id))
+                    storage.add_filter_event(
+                        run_id,
+                        "rewrite_cache",
+                        "reused",
+                        item,
+                        raw_id_map.get(item.id),
+                        "rewrite_cache_hit",
+                        "Reused rewritten title and summary from previous run",
+                    )
+                else:
+                    items_to_rewrite.append(item)
+            if cached_rewritten:
+                _log(
+                    storage,
+                    run_id,
+                    "info",
+                    "pipeline",
+                    "rewrite_cache",
+                    f"reused={len(cached_rewritten)} pending={len(items_to_rewrite)}",
+                )
+
+        rewritten = []
+        if items_to_rewrite:
+            rewritten = llm.rewrite_items(
+                items_to_rewrite,
+                on_item_rewritten=lambda item: storage.upsert_processed(
+                    run_id, item, "rewritten", raw_id_map.get(item.id)
+                ),
+            )
+        rewritten = cached_rewritten + rewritten
         rewritten_ids = {item.id for item in rewritten}
         for item in selected_items:
             if item.id not in rewritten_ids:

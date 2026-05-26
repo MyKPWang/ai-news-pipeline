@@ -252,6 +252,43 @@ class Storage:
                 ),
             )
 
+    def get_latest_rewritten_items(self, item_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+        cached: dict[str, dict[str, Any]] = {}
+        unique_item_ids = [item_id for item_id in dict.fromkeys(item_ids) if item_id]
+        if not unique_item_ids:
+            return cached
+        with self.connect() as conn:
+            for item_id in unique_item_ids:
+                row = conn.execute(
+                    """
+                    select category, selection_reason, core_fact, rewritten_title,
+                           summary, risk_flags_json
+                    from processed_items
+                    where item_id = ?
+                      and stage in ('rewritten', 'publishable')
+                      and coalesce(rewritten_title, '') != ''
+                      and coalesce(summary, '') != ''
+                    order by updated_at desc, id desc
+                    limit 1
+                    """,
+                    (item_id,),
+                ).fetchone()
+                if not row:
+                    continue
+                try:
+                    risk_flags = json.loads(row["risk_flags_json"] or "[]")
+                except json.JSONDecodeError:
+                    risk_flags = []
+                cached[item_id] = {
+                    "category": row["category"] or "",
+                    "selection_reason": row["selection_reason"] or "",
+                    "core_fact": row["core_fact"] or "",
+                    "rewritten_title": row["rewritten_title"] or "",
+                    "summary": row["summary"] or "",
+                    "risk_flags": risk_flags if isinstance(risk_flags, list) else [],
+                }
+        return cached
+
     def add_filter_event(
         self,
         run_id: int,

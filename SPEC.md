@@ -968,6 +968,7 @@ data = {
 - SQLite 中的 `app_logs` 和 `llm_calls` 保存可查询索引、摘要、状态和日志文件路径
 - 改写失败、基础文本规则未通过或需要人工检查的条目输出到 `output/review_YYYYMMDD.json`
 - 若 `stop_publish_on_llm_error=true` 且 LLM 关键步骤失败，只生成预览文件，不推送公众号
+- 若运行在 LLM 改写阶段被 OpenClaw 或系统 SIGKILL 打断，已通过逐条回调写入 SQLite 的 `rewritten` / `publishable` 条目可在下次运行中复用。`runtime.reuse_rewrite_cache=true` 时，系统会按 `item_id` 查找历史成功改写结果，只把未完成条目重新提交给 LLM。
 - 若 `require_rewritten_title_and_summary=true`，未成功改写的条目不得进入最终公众号 HTML
 - 公众号 HTML 模板只能展示 `rewritten_title` 和 `summary`，不得展示 `original_title` 或 `original_desc`
 
@@ -1048,6 +1049,7 @@ bge_model:
 runtime:
   lookback_hours: 24
   default_no_publish: false
+  reuse_rewrite_cache: true
 
 # 公众号推送配置
 wechat_publish:

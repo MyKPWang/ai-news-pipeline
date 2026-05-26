@@ -188,6 +188,6 @@ python3 -m src.main
 - Playwright 报找不到浏览器：执行 `python3 -m playwright install chromium`。
 - Docker API 连接失败：确认电脑 A 上服务可通过 `http://localhost:4000` 访问。
 - LLM 失败：确认 `secrets.yaml` 中 `minimax_api.api_key` 已填写。
-- OpenClaw 在 LLM 阶段被 SIGKILL：优先确认使用最新代码；新版默认把 `rewrite_batch_size` 限制为 4，并在 BGE 后释放模型内存。如果仍被杀，可在 `config.yaml` 中临时设置 `bge_model.enabled: false`，或进一步降低 `minimax_api.rewrite_batch_size_cap`。
+- OpenClaw 在 LLM 阶段被 SIGKILL：优先确认使用最新代码；新版默认把 `rewrite_batch_size` 限制为 4，并在 BGE 后释放模型内存。`runtime.reuse_rewrite_cache: true` 时，重跑会复用上一轮已成功改写的条目，只继续处理未完成条目。如果仍被杀，可在 `config.yaml` 中临时设置 `bge_model.enabled: false`，或进一步降低 `minimax_api.rewrite_batch_size_cap`。
 - 没有公众号草稿：确认没有使用 `--no-publish`，且 `wechat_publish.auto_publish: true`。
 - 当天输出为空：微信公众号可能 24 小时内没有新文章，门户网站也可能没有通过筛选的内容，这不是程序错误。

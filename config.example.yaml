@@ -69,6 +69,7 @@ bge_model:
 runtime:
   lookback_hours: 24
   default_no_publish: false
+  reuse_rewrite_cache: true
 
 wechat_publish:
   thumb_media_id: ""
