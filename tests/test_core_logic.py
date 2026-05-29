@@ -298,12 +298,12 @@ class RewriteAndAggregationTest(unittest.TestCase):
         self.assertIn("<h3", html)
         self.assertIn("{{ item.rewritten_title or item.title }}", template_source)
         self.assertIn(
-            '<h3 style="color:#1890ff;font-weight:bold;font-size:17px;margin-top:15px;margin-bottom:5px;">改写后的标题</h3>',
+            '<h3 style="color:#1890ff;font-weight:bold;font-size:17px;line-height:1.38;margin:0 0 6px 0;">改写后的标题</h3>',
             html,
         )
-        self.assertIn('<p style="color:#666;font-size:15px;margin-bottom:5px;">改写后的摘要内容。</p>', html)
-        self.assertIn('<p style="color:#666;font-size:13px;margin-top:0;">来源：测试源 | 1小时前</p>', html)
-        self.assertIn('<p style="color:#666;font-size:13px;margin-top:0;">原文链接：<a href="https://example.com"', html)
+        self.assertIn('<p style="color:#666;font-size:15px;line-height:1.55;margin:0 0 6px 0;">改写后的摘要内容。</p>', html)
+        self.assertIn('<p style="color:#666;font-size:13px;line-height:1.45;margin:0 0 4px 0;">来源：测试源 | 1小时前</p>', html)
+        self.assertIn('<p style="color:#666;font-size:13px;line-height:1.45;margin:0 0 16px 0;">原文链接：<a href="https://example.com"', html)
         self.assertIn('"title": "不要展示的原标题"', json.dumps(data["categories"][0]["items"][0], ensure_ascii=False))
         self.assertIn('"desc": "不要展示的原摘要"', json.dumps(data["categories"][0]["items"][0], ensure_ascii=False))
         self.assertNotIn("来源：测试源  |", html)
