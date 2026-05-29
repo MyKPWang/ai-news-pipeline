@@ -10,29 +10,29 @@
 
     {# ========== 热点板块 ========== #}
     {% if hot_items %}
-    <h2 style="color:#ff4d4f;font-weight:bold;font-size:20px;margin-top:20px;margin-bottom:10px;">🔥 今日热点</h2>
-    <ul style="background:#fff5f5;padding:8px 20px;border-radius:8px;list-style:none;">
+    <h2 style="color:#ff4d4f;font-weight:bold;font-size:20px;">🔥 今日热点</h2>
+    <ul style="background:#fff5f5;padding:3px 20px;border-radius:8px;list-style:none;">
         {% for item in hot_items %}
-        <li style="font-size:15px;line-height:1.5;margin-bottom:5px;">• {{ item }}</li>
+        <li style="font-size:15px;line-height:1.5;">• {{ item }}</li>
         {% endfor %}
     </ul>
     {% endif %}
 
     {# ========== 分类内容 ========== #}
     {% for cat in categories %}
-    <h2 style="color:#000000;font-weight:bold;font-size:19px;margin-top:20px;margin-bottom:10px;">🏷️ {{ cat.name }}</h2>
+    <h2 style="color:#000000;font-weight:bold;font-size:19px;margin-top:10px;margin-bottom:10px;">🏷️ {{ cat.name }}</h2>
 
         {% for item in cat['items'] %}
-        <h3 style="color:#1890ff;font-weight:bold;font-size:17px;margin-top:15px;margin-bottom:5px;">{{ item.rewritten_title or item.title }}</h3>
+        <h3 style="color:#1890ff;font-weight:bold;font-size:17px;margin-top:1px;margin-bottom:1px;">{{ item.rewritten_title or item.title }}</h3>
         {% if item.summary %}
-        <p style="color:#666;font-size:15px;margin-bottom:5px;">{{ item.summary }}</p>
+        <p style="color:#666;font-size:15px;margin-bottom:1px;">{{ item.summary }}</p>
         {% elif item.desc %}
-        <p style="color:#666;font-size:15px;margin-bottom:5px;">{{ item.desc }}</p>
+        <p style="color:#666;font-size:15px;margin-bottom:1px;">{{ item.desc }}</p>
         {% endif %}
-        <p style="color:#666;font-size:13px;margin-top:0;">{% if item.source %}来源：{{ item.source }}{% endif %}{% if item.time_ago %} | {{ item.time_ago }}{% endif %}</p>
+        <p style="color:#666;font-size:13px;margin-top:0;line-height:1.0;">{% if item.source %}来源：{{ item.source }}{% endif %}{% if item.time_ago %} | {{ item.time_ago }}{% endif %}</p>
 
         {% if item.link %}
-        <p style="color:#666;font-size:13px;margin-top:0;">原文链接：<a href="{{ item.link }}" target="_blank" style="color:#1890ff;text-decoration:underline;">{{ item.link }}</a></p>
+        <p style="color:#666;font-size:13px;margin-top:0;line-height:1.0;">原文链接：<a href="{{ item.link }}" target="_blank" style="color:#1890ff;text-decoration:underline;">{{ item.link }}</a></p>
         {% endif %}
 
         {% endfor %}
