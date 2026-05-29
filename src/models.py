@@ -60,6 +60,8 @@ class NewsItem:
 
     def to_publish_dict(self) -> dict[str, Any]:
         return {
+            "title": self.title,
+            "desc": self.desc,
             "rewritten_title": self.rewritten_title,
             "summary": self.summary,
             "source": self.source,

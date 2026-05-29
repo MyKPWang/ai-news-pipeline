@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import types
 import unittest
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -261,6 +262,7 @@ class RewriteAndAggregationTest(unittest.TestCase):
 
         self.assertIn("改写后的标题", html)
         self.assertIn("改写后的摘要内容。", html)
+        self.assertIn('"title": "不要展示的原标题"', json.dumps(item.to_publish_dict(), ensure_ascii=False))
         self.assertIn(';">改写后的标题</div>', html)
         self.assertIn(';">来源：测试源 | 1小时前</div>', html)
         self.assertNotIn("来源：测试源  |", html)
@@ -269,6 +271,8 @@ class RewriteAndAggregationTest(unittest.TestCase):
 
     def test_wechat_publish_template_uses_original_structure(self):
         item = NewsItem(
+            title="不要展示的原标题",
+            desc="不要展示的原摘要",
             source="测试源",
             url="https://example.com",
             time_text="1小时前",
@@ -293,11 +297,18 @@ class RewriteAndAggregationTest(unittest.TestCase):
 
         self.assertIn("<h3", html)
         self.assertIn("{{ item.rewritten_title or item.title }}", template_source)
-        self.assertIn("改写后的标题", html)
+        self.assertIn(
+            '<h3 style="color:#1890ff;font-weight:bold;font-size:17px;margin-top:15px;margin-bottom:5px;">改写后的标题</h3>',
+            html,
+        )
         self.assertIn('<p style="color:#666;font-size:15px;margin-bottom:5px;">改写后的摘要内容。</p>', html)
-        self.assertIn("来源：测试源 | 1小时前", html)
+        self.assertIn('<p style="color:#666;font-size:13px;margin-top:0;">来源：测试源 | 1小时前</p>', html)
         self.assertIn('<p style="color:#666;font-size:13px;margin-top:0;">原文链接：<a href="https://example.com"', html)
+        self.assertIn('"title": "不要展示的原标题"', json.dumps(data["categories"][0]["items"][0], ensure_ascii=False))
+        self.assertIn('"desc": "不要展示的原摘要"', json.dumps(data["categories"][0]["items"][0], ensure_ascii=False))
         self.assertNotIn("来源：测试源  |", html)
+        self.assertNotIn("\n            改写后的标题", html)
+        self.assertNotIn("来源：测试源\n", html)
 
 
 class MockPipelineTest(unittest.TestCase):
