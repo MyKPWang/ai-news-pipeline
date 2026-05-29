@@ -267,7 +267,7 @@ class RewriteAndAggregationTest(unittest.TestCase):
         self.assertNotIn("不要展示的原标题", html)
         self.assertNotIn("不要展示的原摘要", html)
 
-    def test_wechat_publish_template_does_not_indent_title_or_source(self):
+    def test_wechat_publish_template_uses_original_structure(self):
         item = NewsItem(
             source="测试源",
             url="https://example.com",
@@ -287,17 +287,17 @@ class RewriteAndAggregationTest(unittest.TestCase):
         template = env.get_template("news.html")
 
         html = template.render(title="测试文章", **data, sources_str="", author="", date="2026-05-25")
+        template_source = (Path(__file__).resolve().parent.parent / "wechat-publish-tool" / "templates" / "news.html").read_text(
+            encoding="utf-8"
+        )
 
-        self.assertIn(';">改写后的标题</div>', html)
-        self.assertIn(';">改写后的摘要内容。</div>', html)
-        self.assertIn(';">来源：测试源 | 1小时前</div>', html)
-        self.assertIn(';">原文链接：<a href="https://example.com"', html)
+        self.assertIn("<h3", html)
+        self.assertIn("{{ item.rewritten_title or item.title }}", template_source)
+        self.assertIn("改写后的标题", html)
+        self.assertIn('<p style="color:#666;font-size:15px;margin-bottom:5px;">改写后的摘要内容。</p>', html)
+        self.assertIn("来源：测试源 | 1小时前", html)
+        self.assertIn('<p style="color:#666;font-size:13px;margin-top:0;">原文链接：<a href="https://example.com"', html)
         self.assertNotIn("来源：测试源  |", html)
-        self.assertNotIn("<h3", html)
-        self.assertNotIn("<p style=\"color:#666", html)
-        self.assertNotIn("</div>\n\n", html)
-        self.assertNotIn("\n            改写后的标题", html)
-        self.assertNotIn("\n            来源：测试源", html)
 
 
 class MockPipelineTest(unittest.TestCase):
