@@ -514,7 +514,7 @@ class NewsItem:
 - 入选条目中进入 `review` 的比例超过配置阈值。
 - 最终可发布条目数低于配置阈值。
 
-阻断发布时，系统仍应保存 SQLite 记录、日志、review JSON 和预览 HTML，但不上传公众号草稿。
+阻断发布时，系统仍应保存 SQLite 记录、日志、review JSON 和公众号同款 HTML，但不上传公众号草稿。
 
 ### 4.1 粗筛规则
 
@@ -900,7 +900,7 @@ JSON 格式：
 | 输出不是 JSON | 追加“只输出 JSON”修复提示重试一次 |
 | 部分条目缺失 | 保留成功条目，失败条目记录到日志 |
 | 全局筛选失败 | 停止自动发布，只保存候选 JSON 和错误日志 |
-| 逐篇重写失败 | 失败条目不得使用原文标题/摘要直接发布；生成预览 HTML，但默认不自动推送公众号 |
+| 逐篇重写失败 | 失败条目不得使用原文标题/摘要直接发布；生成公众号同款 HTML，但默认不自动推送公众号 |
 
 ## 5. 输出格式
 
@@ -958,7 +958,7 @@ data = {
 ```
 
 ### 5.3 文件输出
-- HTML 报告输出到 `output/` 目录
+- 公众号同款 HTML 输出到 `wechat-publish-tool/output/news_YYYYMMDD.html`
 - 日志输出到 `logs/` 目录
 - SQLite 主数据库输出到 `data/news.db`
 - 原始采集结果可选导出到 `output/raw_YYYYMMDD.json`
@@ -967,7 +967,7 @@ data = {
 - LLM 完整请求/响应日志输出到 `logs/llm_YYYYMMDD.jsonl`
 - SQLite 中的 `app_logs` 和 `llm_calls` 保存可查询索引、摘要、状态和日志文件路径
 - 改写失败、基础文本规则未通过或需要人工检查的条目输出到 `output/review_YYYYMMDD.json`
-- 若 `stop_publish_on_llm_error=true` 且 LLM 关键步骤失败，只生成预览文件，不推送公众号
+- 若 `stop_publish_on_llm_error=true` 且 LLM 关键步骤失败，只生成公众号同款 HTML，不推送公众号
 - 若运行在 LLM 改写阶段被 OpenClaw 或系统 SIGKILL 打断，已通过逐条回调写入 SQLite 的 `rewritten` / `publishable` 条目可在下次运行中复用。`runtime.reuse_rewrite_cache=true` 时，系统会按 `item_id` 查找历史成功改写结果，只把未完成条目重新提交给 LLM。
 - 若 `require_rewritten_title_and_summary=true`，未成功改写的条目不得进入最终公众号 HTML
 - 公众号 HTML 模板只能展示 `rewritten_title` 和 `summary`，不得展示 `original_title` 或 `original_desc`
@@ -1054,7 +1054,7 @@ runtime:
 # 公众号推送配置
 wechat_publish:
   thumb_media_id: ""  # 首次运行自动获取
-  auto_publish: false  # 一期默认只上传草稿/生成预览，确认稳定后再自动发布
+  auto_publish: false  # 一期默认只上传草稿/生成公众号同款 HTML，确认稳定后再自动发布
 
 # 输出和安全配置
 output:
@@ -1201,7 +1201,7 @@ python3 -m src.main
 python3 -m src.main --no-publish
 ```
 
-`--no-publish` 仍会执行采集、过滤、去重、LLM 筛选、LLM 改写、SQLite 写入、日志记录和预览 HTML 生成，只跳过微信公众号草稿箱上传，适合本地联调和 OpenClaw 任务上线前验证。
+`--no-publish` 仍会执行采集、过滤、去重、LLM 筛选、LLM 改写、SQLite 写入、日志记录和公众号同款 HTML 生成，只跳过微信公众号草稿箱上传，适合本地联调和 OpenClaw 任务上线前验证。
 
 指定配置文件：
 
@@ -1247,7 +1247,7 @@ python3 scripts/minimax_rich_smoke.py
 python3 -m src.main --no-publish
 ```
 
-该命令会真实读取电脑 A 本机 Docker 微信缓存服务、真实抓取门户网站、真实调用 MiniMax，并生成 SQLite、日志、review JSON 和预览 HTML，但不会上传公众号草稿。
+该命令会真实读取电脑 A 本机 Docker 微信缓存服务、真实抓取门户网站、真实调用 MiniMax，并生成 SQLite、日志、review JSON 和公众号同款 HTML，但不会上传公众号草稿。
 
 ## 9. TODO 清单
 
@@ -1287,7 +1287,7 @@ python3 -m src.main --no-publish
 - 能调用 MiniMax 基于标题和摘要完成全局筛选、分类、热点、导读生成。
 - 全局筛选结果满足 `AI资讯 <= 10`、`智能硬件 <= 4`。
 - 能调用 MiniMax 完成标题和摘要重写。
-- 能生成公众号预览 HTML。
+- 能生成公众号同款 HTML。
 - 能在配置允许时上传到公众号草稿箱。
 
 ### 10.2 质量验收

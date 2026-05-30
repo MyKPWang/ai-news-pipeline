@@ -45,7 +45,7 @@ GET  /api/v1/wx/articles/{article_id}  # 可选，只有需要正文详情时使
 - 只保留最近 24 小时内资讯。
 - 基于 `ai-news-v11` 过滤词做规则过滤，并保留 AI 相关正向保护。
 - 使用 MiniMax-M2.7 完成全局筛选、分类和逐篇改写。
-- 生成预览 HTML，可选择上传到微信公众号草稿箱。
+- 生成公众号同款 HTML，可选择上传到微信公众号草稿箱。
 
 ## 安装
 
@@ -107,7 +107,7 @@ python3 -m src.main --no-publish
 python3 -m src.main --config config.yaml --secrets secrets.yaml
 ```
 
-`--no-publish` 仍会执行采集、过滤、去重、LLM 筛选、LLM 改写、SQLite 写入、日志记录和预览 HTML 生成，只跳过微信公众号草稿箱上传。
+`--no-publish` 仍会执行采集、过滤、去重、LLM 筛选、LLM 改写、SQLite 写入、日志记录和公众号同款 HTML 生成，只跳过微信公众号草稿箱上传。
 
 ## 测试
 
@@ -150,7 +150,7 @@ python3 scripts/minimax_rich_smoke.py
 python3 -m src.main --no-publish
 ```
 
-这会真实读取电脑 A 本机 Docker 微信缓存服务、真实抓取门户网站、真实调用 MiniMax，并生成 SQLite、日志、review JSON 和预览 HTML，但不会上传公众号草稿。
+这会真实读取电脑 A 本机 Docker 微信缓存服务、真实抓取门户网站、真实调用 MiniMax，并生成 SQLite、日志、review JSON 和公众号同款 HTML，但不会上传公众号草稿。
 
 ## OpenClaw 定时任务示例
 
@@ -169,7 +169,7 @@ python3 -m src.main
 - 原始数据导出: `output/raw_YYYYMMDD.json`
 - 处理后数据导出: `output/processed_YYYYMMDD.json`
 - 人工检查列表: `output/review_YYYYMMDD.json`
-- 预览 HTML: `output/news_YYYYMMDD_HHMMSS.html`
+- 公众号同款 HTML: `wechat-publish-tool/output/news_YYYYMMDD.html`
 
 ## 发布说明
 

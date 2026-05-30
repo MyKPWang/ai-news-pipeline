@@ -5,6 +5,19 @@ import json
 from pathlib import Path
 
 
+def render_wechat_html(
+    data: dict,
+    title: str,
+    sources: list[str],
+    config: dict,
+    tool_dir: str | Path = "wechat-publish-tool",
+) -> str:
+    module = _load_publish_module(Path(tool_dir))
+    author = config.get("wechat_publish", {}).get("author", "Valkyrie")
+    html_content = module.generate_html(data, title, sources=sources, author=author)
+    return str(module.save_html(html_content, title))
+
+
 def publish_to_wechat_tool(
     data: dict,
     title: str,
@@ -12,19 +25,23 @@ def publish_to_wechat_tool(
     config: dict,
 ) -> bool:
     tool_dir = Path("wechat-publish-tool")
+    module = _load_publish_module(tool_dir)
+    _write_tool_config(tool_dir, config)
+    author = config.get("wechat_publish", {}).get("author", "Valkyrie")
+    return bool(module.publish_news(data, title, sources=sources, author=author))
+
+
+def _load_publish_module(tool_dir: Path):
     module_path = tool_dir / "publish_news.py"
     if not module_path.exists():
         raise FileNotFoundError(f"wechat-publish-tool not found: {module_path}")
-
-    _write_tool_config(tool_dir, config)
 
     spec = importlib.util.spec_from_file_location("wechat_publish_tool", module_path)
     if spec is None or spec.loader is None:
         raise RuntimeError("Failed to load wechat-publish-tool")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    author = config.get("wechat_publish", {}).get("author", "Valkyrie")
-    return bool(module.publish_news(data, title, sources=sources, author=author))
+    return module
 
 
 def _write_tool_config(tool_dir: Path, config: dict) -> None:

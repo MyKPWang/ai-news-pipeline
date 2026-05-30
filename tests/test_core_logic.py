@@ -4,19 +4,21 @@ import tempfile
 import types
 import unittest
 import json
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
 from jinja2 import Environment, FileSystemLoader
 
-from src.aggregator import build_publish_data, render_preview_html
+from src.aggregator import build_publish_data
 from src.interceptors.dedup import exact_dedup
 from src.interceptors.keyword_filter import keyword_filter
 from src.llm.minimax import MiniMaxClient, parse_json_response
 from src.llm.prompts import build_global_selection_prompt, build_rewrite_prompt
 from src.models import NewsItem
 from src.pipeline import run_pipeline, sort_by_source_priority, validate_rewritten
+from src.publisher import render_wechat_html
 from src.time_utils import parse_time_value
 
 
@@ -243,7 +245,7 @@ class RewriteAndAggregationTest(unittest.TestCase):
         self.assertEqual([item], publishable)
         self.assertEqual([], review)
 
-    def test_preview_html_does_not_fallback_to_original_title_or_desc(self):
+    def test_wechat_html_does_not_fallback_to_original_title_or_desc(self):
         item = NewsItem(
             title="不要展示的原标题",
             desc="不要展示的原摘要",
@@ -256,15 +258,19 @@ class RewriteAndAggregationTest(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as tmp:
+            tool_dir = Path(tmp) / "wechat-publish-tool"
+            shutil.copytree(Path(__file__).resolve().parent.parent / "wechat-publish-tool" / "templates", tool_dir / "templates")
+            shutil.copy(Path(__file__).resolve().parent.parent / "wechat-publish-tool" / "publish_news.py", tool_dir / "publish_news.py")
             data = build_publish_data([item], {"hot_topics": [], "insight": ""})
-            html_path = render_preview_html(data, "测试文章", tmp)
+            html_path = render_wechat_html(data, "测试文章", ["测试源"], {"wechat_publish": {"author": ""}}, tool_dir=tool_dir)
             html = Path(html_path).read_text(encoding="utf-8")
 
+        self.assertIn("wechat-publish-tool/output/news_", html_path)
         self.assertIn("改写后的标题", html)
         self.assertIn("改写后的摘要内容。", html)
         self.assertIn('"title": "不要展示的原标题"', json.dumps(item.to_publish_dict(), ensure_ascii=False))
-        self.assertIn(';">改写后的标题</div>', html)
-        self.assertIn(';">来源：测试源 | 1小时前</div>', html)
+        self.assertIn(';">改写后的标题</h3>', html)
+        self.assertIn(';">来源：测试源 | 1小时前</p>', html)
         self.assertNotIn("来源：测试源  |", html)
         self.assertNotIn("不要展示的原标题", html)
         self.assertNotIn("不要展示的原摘要", html)
@@ -385,13 +391,15 @@ class MockPipelineTest(unittest.TestCase):
 
             with patch("src.pipeline.collect_all_sources", return_value=source_items), patch(
                 "src.pipeline.MiniMaxClient", FakeMiniMaxClient
-            ), patch("src.pipeline.render_preview_html", return_value=str(Path(tmp) / "preview.html")):
+            ), patch("src.pipeline.render_wechat_html", return_value=str(Path(tmp) / "wechat.html")) as render_html:
                 result = run_pipeline(config, no_publish=True)
 
             self.assertEqual(2, len(result.raw_items))
             self.assertEqual(1, len(result.selected_items))
             self.assertEqual(1, len(result.publishable_items))
             self.assertEqual("千问开放厂商接入能力", result.publishable_items[0].rewritten_title)
+            self.assertEqual(str(Path(tmp) / "wechat.html"), result.html_path)
+            render_html.assert_called_once()
             self.assertFalse(result.published)
 
     def test_pipeline_reuses_rewrite_cache_on_retry(self):
@@ -456,7 +464,7 @@ class MockPipelineTest(unittest.TestCase):
 
             with patch("src.pipeline.collect_all_sources", side_effect=lambda *_args: make_source_items()), patch(
                 "src.pipeline.MiniMaxClient", FakeMiniMaxClient
-            ), patch("src.pipeline.render_preview_html", return_value=str(Path(tmp) / "preview.html")):
+            ), patch("src.pipeline.render_wechat_html", return_value=str(Path(tmp) / "wechat.html")):
                 first = run_pipeline(config, no_publish=True)
                 second = run_pipeline(config, no_publish=True)
 

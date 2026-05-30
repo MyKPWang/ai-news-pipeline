@@ -3,13 +3,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timedelta
 
-from .aggregator import build_article_title, build_publish_data, collect_sources, render_preview_html
+from .aggregator import build_article_title, build_publish_data, collect_sources
 from .interceptors.bge_dedup import bge_dedup
 from .interceptors.dedup import exact_dedup
 from .interceptors.keyword_filter import keyword_filter
 from .llm.minimax import LlmError, MiniMaxClient
 from .models import NewsItem, PipelineResult
-from .publisher import publish_to_wechat_tool
+from .publisher import publish_to_wechat_tool, render_wechat_html
 from .sources.portals import PortalSource
 from .sources.wechat import WechatApiSource
 from .storage import Storage
@@ -148,11 +148,12 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
 
         data = build_publish_data(publishable_items, global_info)
         title = build_article_title()
-        html_path = render_preview_html(data, title)
+        sources = collect_sources(publishable_items)
+        html_path = render_wechat_html(data, title, sources, config)
 
         should_publish = should_upload(config, no_publish, selected_items, publishable_items, review_items)
         if should_publish:
-            published = publish_to_wechat_tool(data, title, collect_sources(publishable_items), config)
+            published = publish_to_wechat_tool(data, title, sources, config)
 
         export_outputs(config, storage, run_date, raw_items, publishable_items, review_items)
         status = "success" if published or no_publish else "partial"
