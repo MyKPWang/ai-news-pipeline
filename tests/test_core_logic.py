@@ -66,6 +66,44 @@ class FilterAndDedupTest(unittest.TestCase):
         self.assertEqual([item], result.kept)
         self.assertEqual(item, result.protected[0][0])
 
+    def test_keyword_filter_removes_financing_main_events_even_when_ai_related(self):
+        unitree = NewsItem(
+            title="宇树科技科创板IPO将于6月1日上会，计划募资42亿元",
+            desc="募集资金将用于机器人用人工智能模型研发、机器人本体升级和制造基地建设。",
+        )
+        openrouter = NewsItem(
+            title="OpenRouter 完成 1.13 亿美元 B 轮融资",
+            desc="该平台面向开发者提供多模型调用服务，由多家科技公司参投。",
+        )
+        valuation = NewsItem(
+            title="AI公司拟融资10亿美元，估值升至110亿美元",
+            desc="公司提供大模型推理基础设施服务，交易仍处于洽谈阶段。",
+        )
+        ipo = NewsItem(
+            title="OpenAI冲刺9月IPO，奥特曼想快，CFO说再等等",
+            desc="高盛和摩根士丹利已经在替OpenAI起草IPO招股书草案。",
+        )
+        debt = NewsItem(
+            title="阿波罗携黑石筹资360亿美元，为Anthropic采购谷歌TPU",
+            desc="该交易是面向AI芯片采购的债务融资安排。",
+        )
+
+        result = keyword_filter([unitree, openrouter, valuation, ipo, debt])
+
+        self.assertEqual([], result.kept)
+        self.assertEqual([unitree, openrouter, valuation, ipo, debt], [item for item, _reason in result.removed])
+
+    def test_keyword_filter_keeps_technical_news_when_financing_is_title_noise(self):
+        item = NewsItem(
+            title="5篇AI生成数学论文被接收，00后创业者斩获巨额融资",
+            desc="初创AI公司Axiom Math宣布，其AI系统提交的8篇数学论文中，5篇通过同行评审并被接收。",
+        )
+
+        result = keyword_filter([item])
+
+        self.assertEqual([item], result.kept)
+        self.assertEqual([], result.removed)
+
     def test_exact_dedup_by_title_and_url(self):
         first = NewsItem(title="同一条新闻", url="https://example.com/a")
         duplicate = NewsItem(title="同一条新闻", url="https://example.com/a")
@@ -115,6 +153,28 @@ class LlmLogicTest(unittest.TestCase):
         self.assertIn('"source_type": "网页"', prompt)
         self.assertIn("公众号资讯优先级高于网页资讯", prompt)
         self.assertIn("只选择 1 条", prompt)
+
+    def test_selection_prompt_rejects_financing_main_events(self):
+        item = NewsItem(title="AI公司完成B轮融资", desc="投资方包括多家科技基金。", source_type="portal")
+        prompt = build_global_selection_prompt([item])
+
+        self.assertIn("融资、IPO、估值、股价、普通投资事件不得因涉及 AI 公司而入选", prompt)
+        self.assertIn("融资不是核心事实", prompt)
+        self.assertIn("明确技术、产品、论文或模型能力进展", prompt)
+
+    def test_selection_prompt_prioritizes_policy_and_commercialization_signals(self):
+        policy = NewsItem(title="上海发布AI产业扶持政策", desc="支持算力、模型和智能硬件生态建设。")
+        commercial = NewsItem(title="AI产品开放付费API", desc="多家企业客户已接入，开发者生态合作扩大。")
+        exam = NewsItem(title="高考期间AI平台禁用拍题", desc="平台发布考试期间功能限制。")
+        prompt = build_global_selection_prompt([policy, commercial, exam])
+
+        self.assertIn("产业政策风向标", prompt)
+        self.assertIn("扶持、监管、标准、准入、政府采购、产业规划", prompt)
+        self.assertIn("商业化落地信号", prompt)
+        self.assertIn("付费/API/订阅/价格策略、企业客户采用、生态合作、渠道接入", prompt)
+        self.assertIn("融资、IPO、估值、股价、普通投资", prompt)
+        self.assertIn("考试期间禁用拍题、平台自律/治理年报、单纯榜单得分", prompt)
+        self.assertIn("产品落地或商业化采用强相关", prompt)
 
     def test_parse_json_response_from_plain_and_markdown_text(self):
         self.assertEqual({"items": []}, parse_json_response('{"items": []}'))
@@ -304,12 +364,12 @@ class RewriteAndAggregationTest(unittest.TestCase):
         self.assertIn("<h3", html)
         self.assertIn("{{ item.rewritten_title or item.title }}", template_source)
         self.assertIn(
-            '<h3 style="color:#1890ff;font-weight:bold;font-size:17px;line-height:1.38;margin:0 0 6px 0;">改写后的标题</h3>',
+            '<h3 style="color:#1890ff;font-weight:bold;font-size:17px;margin-top:15px;margin-bottom:5px;">改写后的标题</h3>',
             html,
         )
-        self.assertIn('<p style="color:#666;font-size:15px;line-height:1.55;margin:0 0 6px 0;">改写后的摘要内容。</p>', html)
-        self.assertIn('<p style="color:#666;font-size:13px;line-height:1.45;margin:0 0 4px 0;">来源：测试源 | 1小时前</p>', html)
-        self.assertIn('<p style="color:#666;font-size:13px;line-height:1.45;margin:0 0 16px 0;">原文链接：<a href="https://example.com"', html)
+        self.assertIn('<p style="color:#666;font-size:15px;margin-bottom:5px;">改写后的摘要内容。</p>', html)
+        self.assertIn('<p style="color:#666;font-size:13px;margin-top:0;">来源：测试源 | 1小时前</p>', html)
+        self.assertIn('<p style="color:#666;font-size:13px;margin-top:0;">原文链接：<a href="https://example.com"', html)
         self.assertIn('"title": "不要展示的原标题"', json.dumps(data["categories"][0]["items"][0], ensure_ascii=False))
         self.assertIn('"desc": "不要展示的原摘要"', json.dumps(data["categories"][0]["items"][0], ensure_ascii=False))
         self.assertNotIn("来源：测试源  |", html)

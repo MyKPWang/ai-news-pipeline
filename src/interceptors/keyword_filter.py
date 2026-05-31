@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 from ..models import NewsItem
 
@@ -92,6 +93,39 @@ POSITIVE_PROTECTION_KEYWORDS = [
 ]
 
 
+FINANCING_MAIN_EVENT_PATTERNS = [
+    r"完成.{0,20}融资",
+    r"获.{0,20}融资",
+    r"拟融资",
+    r"洽谈.{0,10}融资",
+    r"冲刺.{0,10}IPO",
+    r"IPO.{0,20}(招股|草案|上会|申请|计划|冲刺)",
+    r"IPO.{0,20}募资",
+    r"上市.{0,20}募资",
+    r"募资.{0,20}(亿元|亿美元|人民币|元)",
+    r"募集资金",
+    r"资金将用于",
+    r"估值.{0,20}(美元|亿元|人民币|升至|达)",
+    r"领投",
+    r"参投",
+    r"投资方",
+    r"债务融资",
+    r"筹资.{0,20}(美元|亿元|人民币|元)",
+    r"筹集.{0,20}债务",
+    r"股权融资",
+    r"收购",
+    r"并购",
+]
+
+
+TECH_PROGRESS_EXCEPTION_PATTERNS = [
+    r"论文.{0,20}(通过同行评审|被接收|接收)",
+    r"(通过同行评审|被接收)",
+    r"(发布|推出|上线|开源|接入|适配|升级).{0,30}(模型|系统|产品|功能|能力|工具|平台|芯片|机器人)",
+    r"(模型|系统|产品|功能|能力|工具|平台|芯片|机器人).{0,30}(发布|推出|上线|开源|接入|适配|升级)",
+]
+
+
 @dataclass
 class FilterDecision:
     kept: list[NewsItem]
@@ -106,6 +140,11 @@ def keyword_filter(items: list[NewsItem]) -> FilterDecision:
 
     for item in items:
         text = item.text_for_filter()
+        financing_match = _financing_main_event_match(item)
+        if financing_match:
+            removed.append((item, financing_match))
+            continue
+
         matched = next((kw for kw in FILTER_KEYWORDS if kw.lower() in text.lower()), "")
         if not matched:
             kept.append(item)
@@ -119,3 +158,27 @@ def keyword_filter(items: list[NewsItem]) -> FilterDecision:
             removed.append((item, matched))
 
     return FilterDecision(kept=kept, removed=removed, protected=protected)
+
+
+def _financing_main_event_match(item: NewsItem) -> str:
+    title = item.title or ""
+    desc = item.desc or ""
+    content = item.content or ""
+    title_match = _first_pattern_match(title, FINANCING_MAIN_EVENT_PATTERNS)
+    desc_match = _first_pattern_match(f"{desc} {content}", FINANCING_MAIN_EVENT_PATTERNS)
+    if not title_match and not desc_match:
+        return ""
+    if title_match and not desc_match and _has_tech_progress_exception(desc):
+        return ""
+    return f"financing_main_event:{title_match or desc_match}"
+
+
+def _first_pattern_match(text: str, patterns: list[str]) -> str:
+    for pattern in patterns:
+        if re.search(pattern, text, flags=re.IGNORECASE):
+            return pattern
+    return ""
+
+
+def _has_tech_progress_exception(text: str) -> bool:
+    return any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in TECH_PROGRESS_EXCEPTION_PATTERNS)
