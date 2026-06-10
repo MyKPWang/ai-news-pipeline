@@ -254,7 +254,10 @@ def validate_rewritten(items: list[NewsItem], copy_threshold: int = 20) -> tuple
             item.risk_flags.append("missing_summary")
         if has_long_copy(item, threshold=copy_threshold):
             item.risk_flags.append("possible_copying")
-        if item.risk_flags:
+        # unverified_rumor 不作为发布障碍，只记录在 review 里供参考
+        blocking_flags = [f for f in item.risk_flags if f not in ("unverified_rumor",)]
+        if blocking_flags:
+            item.risk_flags = blocking_flags
             review.append(item)
         else:
             publishable.append(item)
