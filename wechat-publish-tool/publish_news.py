@@ -144,7 +144,7 @@ def upload_to_wechat(html_content: str, title: str, thumb_media_id: str, config:
         "articles": [{
             "title": title,
             "author": author or "Valkyrie",
-            "digest": f"{title} | 今日资讯精选",
+            "digest": f"{title} | 今日资讯速览",
             "content": html_content,
             "thumb_media_id": thumb_media_id,
         }]
