@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from .aggregator import build_article_title, build_publish_data, collect_sources
 from .interceptors.bge_dedup import bge_dedup
