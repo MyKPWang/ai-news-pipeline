@@ -189,7 +189,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <tbody>
 {% for repo in repos %}
 <tr>
-  <td class="rank-cell{% if repo.rank <= 3 %} top3{% endif %}">{% if repo.rank <= 3 %}<span class="top-badge">TOP{{ repo.rank }}</span>{% else %}{{ repo.rank }}{% endif %}</td>
+  <td class="rank-cell{% if repo.is_top3 %} top3{% endif %}">{% if repo.is_top3 %}<span class="top-badge">TOP{{ repo.rank }}</span>{% else %}{{ repo.rank }}{% endif %}</td>
   <td>
     <div class="repo-name"><a href="{{ repo.link }}" target="_blank">{{ repo.name }}</a></div>
     <div class="desc">{{ repo.description }}</div>
@@ -241,16 +241,18 @@ def generate_github_trending_table(github_items: list, output_dir: Path) -> Opti
                 stars_str = f"{stars_k}K"
             except Exception:
                 stars_str = str(item.extra["stars"])
+        rank = i + 1
+        is_top3 = rank <= 3
         repos.append({
-            "rank": i + 1,
+            "rank": rank,
             "name": item.title,
             "link": item.url,
             "description": desc,
             "stars": stars_str,
+            "is_top3": is_top3,
         })
 
     date_str = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
-    from jinja2 import Template
     html_content = Template(HTML_TEMPLATE).render(date=date_str, repos=repos)
 
     html_debug_path = output_dir / "github_trending_debug.html"
