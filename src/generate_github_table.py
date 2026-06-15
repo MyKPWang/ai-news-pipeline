@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-生成 GitHub AI 趋势榜图片（HTML 渲染 + Playwright 截图方案）
+生成 GitHub AI 趋势榜图片（复刻 v11 样式）
 """
 import json
 import re
@@ -11,9 +11,6 @@ from typing import Optional
 MINI_MAX_API_KEY = ""
 MINI_MAX_BASE_URL = "https://api.minimaxi.chat/v1"
 
-# ---------------------------------------------------------------------------
-# LLM 调用
-# ---------------------------------------------------------------------------
 
 def _call_llm(prompt: str, max_tokens: int = 800, timeout: int = 60) -> str:
     global MINI_MAX_API_KEY, MINI_MAX_BASE_URL
@@ -136,71 +133,135 @@ def generate_chinese_desc(owner: str, repo: str, fallback_desc: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# HTML 模板
+# v11 样式模板（复刻）
 # ---------------------------------------------------------------------------
 
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html>
+HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="zh-CN">
 <head>
-<meta charset="utf-8">
-<style>
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #0d1117; color: #e6edf3; padding: 24px; }
-.header { text-align: center; margin-bottom: 20px; }
-.date { font-size: 13px; color: #7d8590; margin-top: 4px; }
-.subtitle { font-size: 13px; color: #7d8590; margin-top: 4px; }
-.table { width: 100%; border-collapse: collapse; }
-.table th { background: #161b22; color: #7d8590; font-size: 12px; font-weight: 600; text-align: left; padding: 10px 12px; border-bottom: 1px solid #30363d; }
-.table td { padding: 12px; border-bottom: 1px solid #21262d; vertical-align: top; font-size: 13px; line-height: 1.5; }
-.table tr:last-child td { border-bottom: none; }
-.rank { color: #7d8590; font-size: 12px; width: 40px; text-align: center; }
-.rank.top3 { color: #f0883e; font-weight: bold; }
-.repo-name { color: #58a6ff; font-weight: 600; font-size: 14px; }
-.repo-name a { color: inherit; text-decoration: none; }
-.desc { color: #8b949e; margin-top: 3px; font-size: 12px; }
-.stars { color: #f0883e; font-size: 12px; white-space: nowrap; }
-.rank-cell { text-align: center; }
-.top-badge { background: #f0883e; color: #fff; font-size: 10px; padding: 2px 5px; border-radius: 3px; margin-left: 4px; }
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <title>GitHub Trending Weekly Digest</title>
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --bg-page: #f3f4f6;
+            --bg-card: #ffffff;
+            --text-main: #1f2937;
+            --text-sub: #4b5563;
+            --border-radius: 12px;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+            background-color: var(--bg-page);
+            color: var(--text-main);
+            width: 800px;
+            padding: 32px 40px;
+            line-height: 1.6;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            padding: 24px 28px;
+            margin-bottom: 16px;
+            position: relative;
+            transition: transform 0.2s ease, border-left-color 0.2s ease;
+            border-left: 5px solid transparent;
+        }
+
+        .card:hover {
+            transform: translateY(-3px);
+            border-left-color: var(--primary-color);
+        }
+
+        .card-top {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+
+        .rank-badge {
+            background: linear-gradient(135deg, #3b82f6, #6366f1);
+            color: white;
+            font-size: 12px;
+            font-weight: 700;
+            padding: 4px 12px;
+            border-radius: 20px;
+            min-width: 46px;
+            text-align: center;
+        }
+
+        .rank-badge.gold { background: linear-gradient(135deg, #f59e0b, #d97706); }
+        .rank-badge.silver { background: linear-gradient(135deg, #94a3b8, #64748b); }
+        .rank-badge.bronze { background: linear-gradient(135deg, #cd7f32, #a0522d); }
+
+        .meta { display: flex; align-items: center; gap: 8px; }
+
+        .lang-tag {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 4px 8px;
+            border-radius: 6px;
+            color: #fff;
+        }
+
+        .lang-python { background-color: #3776ab; }
+        .lang-javascript { background-color: #f7df1e; color: #000; }
+        .lang-typescript { background-color: #3178c6; }
+        .lang-go { background-color: #00ADD8; }
+        .lang-rust { background-color: #dea584; color: #000; }
+        .lang-java { background-color: #b07219; }
+        .lang-cpp { background-color: #f34b7d; }
+        .lang-c { background-color: #555555; }
+        .lang-html { background-color: #6e7681; }
+        .lang-shell { background-color: #6e7681; }
+        .lang-default { background-color: #6e7681; }
+
+        .stars {
+            color: #fbbf24;
+            font-weight: bold;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+        }
+
+        .stars span { color: var(--text-sub); margin-left: 4px; font-weight: normal; }
+
+        .name { font-size: 17px; font-weight: 700; color: var(--text-main); margin-bottom: 4px; }
+        .description { color: var(--text-sub); font-size: 0.95rem; line-height: 1.7; margin: 0; }
+    </style>
 </head>
 <body>
-<div class="header">
-  <div style="font-size:20px;font-weight:bold;color:#e6edf3;">🔥 GitHub AI 项目趋势榜</div>
-  <div class="date">{{ date }}</div>
-  <div class="subtitle">数据来源：GitHub Trending | 整理：Valkyrie</div>
-</div>
-<table class="table">
-<thead>
-<tr>
-  <th class="rank">#</th>
-  <th>项目</th>
-  <th style="width:80px;text-align:center;">⭐ Stars</th>
-</tr>
-</thead>
-<tbody>
-{% for repo in repos %}
-<tr>
-  <td class="rank-cell{% if repo.is_top3 %} top3{% endif %}">{% if repo.is_top3 %}<span class="top-badge">TOP{{ repo.rank }}</span>{% else %}{{ repo.rank }}{% endif %}</td>
-  <td>
-    <div class="repo-name"><a href="{{ repo.link }}" target="_blank">{{ repo.name }}</a></div>
-    <div class="desc">{{ repo.description }}</div>
-  </td>
-  <td style="text-align:center;">
-    <span class="stars">{{ repo.stars }}</span>
-  </td>
-</tr>
-{% endfor %}
-</tbody>
-</table>
+
+    {% for repo in repos %}
+    <div class="card">
+        <div class="card-top">
+            <div class="rank-badge {% if repo.rank == 1 %}gold{% elif repo.rank == 2 %}silver{% elif repo.rank == 3 %}bronze{% endif %}">#{{ repo.rank }}</div>
+            <div class="meta">
+                {% if repo.language and repo.language != '-' %}
+                <span class="lang-tag lang-{{ repo.language|lower }}">{{ repo.language }}</span>
+                {% endif %}
+                <div class="stars">新增 ★ <span>{{ repo.stars }}</span></div>
+            </div>
+        </div>
+        <div class="name">{{ repo.name }}</div>
+        <p class="description">{{ repo.description }}</p>
+    </div>
+    {% endfor %}
+
 </body>
-</html>
-"""
+</html>"""
 
-
-# ---------------------------------------------------------------------------
-# 核心函数
-# ---------------------------------------------------------------------------
 
 def generate_github_trending_table(github_items: list, output_dir: Path) -> Optional[str]:
     """生成 GitHub 趋势榜图片，返回本地路径或 None"""
@@ -227,19 +288,20 @@ def generate_github_trending_table(github_items: list, output_dir: Path) -> Opti
                 stars_str = f"{stars_k}K"
             except Exception:
                 stars_str = str(item.extra["stars"])
+        language = item.extra.get("language") or "-"
         rank = i + 1
-        is_top3 = rank <= 3
+        badge = "gold" if rank == 1 else "silver" if rank == 2 else "bronze" if rank == 3 else "default"
         repos.append({
             "rank": rank,
             "name": item.title,
             "link": item.url,
             "description": desc,
             "stars": stars_str,
-            "is_top3": is_top3,
+            "language": language,
+            "badge": badge,
         })
 
-    date_str = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
-    html_content = Template(HTML_TEMPLATE).render(date=date_str, repos=repos)
+    html_content = Template(HTML_TEMPLATE).render(repos=repos)
 
     html_debug_path = output_dir / "github_trending_debug.html"
     with open(html_debug_path, "w", encoding="utf-8") as f:
@@ -250,9 +312,9 @@ def generate_github_trending_table(github_items: list, output_dir: Path) -> Opti
         with sync_playwright() as p:
             browser = p.chromium.launch()
             page = browser.new_page()
-            page.set_viewport_size({"width": 780, "height": 900})
+            page.set_viewport_size({"width": 880, "height": 1600})
             page.goto(f"file://{html_debug_path.absolute()}", wait_until="domcontentloaded")
-            page.wait_for_timeout(800)
+            page.wait_for_timeout(1000)
             page.screenshot(path=img_path, full_page=True)
             browser.close()
         print(f"   ✅ GitHub 趋势榜图片已生成: {img_path}")
@@ -284,7 +346,6 @@ def upload_image_to_wechat(img_path: str, config: dict) -> Optional[str]:
         with open(img_path, "rb") as f:
             filename = img_path.split("/")[-1]
             files = {"media": (filename, f, "image/png")}
-            # uploadimg 返回 url，直接可用于文章内嵌图片
             r = requests.post(
                 f"https://api.weixin.qq.com/cgi-bin/media/uploadimg?access_token={token}",
                 files=files, timeout=30

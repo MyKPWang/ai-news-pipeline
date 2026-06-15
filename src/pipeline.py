@@ -172,6 +172,7 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
                             "desc": item.desc,
                             "link": item.url,
                             "stars": item.extra.get("stars", "–"),
+                            "language": item.extra.get("language", ""),
                         }
                         for item in github_items[:10]
                     ],
