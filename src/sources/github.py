@@ -7,7 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import List
 
-from .base import NewsItem, register_source
+from ..models import NewsItem
 
 
 # ossinsight-github skill 脚本路径
@@ -16,12 +16,14 @@ SKILL_SCRIPT = os.path.expanduser(
 )
 
 
-@register_source
 class GithubSource:
     """GitHub AI 趋势项目数据源"""
 
     name = "github"
     url = "https://github.com/trending"
+
+    def __init__(self, config: dict):
+        self.config = config
 
     def collect(self) -> List[NewsItem]:
         """通过 OSSInsight API 获取 GitHub AI 趋势项目"""
@@ -70,8 +72,8 @@ class GithubSource:
                 title=repo_name,
                 desc=description,
                 source=self.name,
-                link=item.get("url", ""),
-                time_ago="过去一周",
+                url=item.get("url", ""),
+                time_text="过去一周",
                 extra=extra,
             )
             news_list.append(news)
