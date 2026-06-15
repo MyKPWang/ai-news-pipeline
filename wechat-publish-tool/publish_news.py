@@ -86,6 +86,7 @@ def generate_html(data: dict, title: str, sources: List[str] = None, author: str
     hot_items = data.get("hot_items", [])
     insight = data.get("insight", "")
     categories = data.get("categories", [])
+    github_trending = data.get("github_trending")
 
     # 底部来源
     if sources:
@@ -98,6 +99,7 @@ def generate_html(data: dict, title: str, sources: List[str] = None, author: str
         hot_items=hot_items,
         insight=insight,
         categories=categories,
+        github_trending=github_trending,
         sources_str=sources_str,
         author=author,
         date=datetime.now().strftime("%Y年%m月%d日")
