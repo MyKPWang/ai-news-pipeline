@@ -15,6 +15,19 @@
 {% endfor %}
 </ul>
 {% endif %}
+{% if github_trending %}
+<h2 style="color:#000000;font-weight:bold;font-size:19px;margin-top:20px;margin-bottom:10px;">🔥 GitHub AI项目趋势榜</h2>
+{% if github_trending.image_url %}
+<img src="{{ github_trending.image_url }}" style="width:100%;max-width:780px;display:block;margin:10px 0;" />
+{% endif %}
+{% if github_trending.items %}
+<p style="font-size:13px;color:#666;line-height:2;margin-top:10px;">
+{% for item in github_trending.items %}
+[{{ loop.index }}] <a href="{{ item.link }}" target="_blank" style="color:#1890ff;text-decoration:none;">{{ item.title }}</a> ⭐ {{ item.stars }}<br/>
+{% endfor %}
+</p>
+{% endif %}
+{% endif %}
 {% for cat in categories %}
 <h2 style="color:#000000;font-weight:bold;font-size:19px;margin-top:20px;margin-bottom:10px;">🏷️ {{ cat.name }}</h2>
 {% for item in cat['items'] %}

@@ -10,6 +10,7 @@ from .interceptors.keyword_filter import keyword_filter
 from .llm.minimax import LlmError, MiniMaxClient
 from .models import NewsItem, PipelineResult
 from .publisher import publish_to_wechat_tool, render_wechat_html
+from .sources.github import GithubSource
 from .sources.portals import PortalSource
 from .sources.wechat import WechatApiSource
 from .storage import Storage
@@ -30,7 +31,7 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
     published = False
 
     try:
-        raw_items = collect_all_sources(config, storage, run_id)
+        raw_items, github_items = collect_all_sources(config, storage, run_id)
         raw_id_map = storage.insert_raw_items(run_id, raw_items)
         _log(storage, run_id, "info", "pipeline", "collected", f"raw_items={len(raw_items)}")
 
@@ -147,6 +148,31 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
             storage.upsert_processed(run_id, item, "publishable", raw_id_map.get(item.id))
 
         data = build_publish_data(publishable_items, global_info)
+        # 生成 GitHub 趋势榜图片
+        github_trending_image_url = None
+        github_trending_data = None
+        if github_items:
+            from .generate_github_table import generate_github_trending_table, upload_image_to_wechat
+            output_dir = Path(__file__).parent.parent / "wechat-publish-tool" / "output"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            img_path = generate_github_trending_table(github_items, output_dir)
+            if img_path:
+                # 上传到微信素材库获取永久 URL
+                publish_config = config.get("wechat_publish", {})
+                github_trending_image_url = upload_image_to_wechat(img_path, publish_config)
+                github_trending_data = {
+                    "image_url": github_trending_image_url,
+                    "items": [
+                        {
+                            "title": item.title,
+                            "desc": item.desc,
+                            "link": item.url,
+                            "stars": item.extra.get("stars", "–"),
+                        }
+                        for item in github_items[:10]
+                    ],
+                }
+                data["github_trending"] = github_trending_data
         title = build_article_title()
         sources = collect_sources(publishable_items)
         html_path = render_wechat_html(data, title, sources, config)
@@ -179,17 +205,21 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         raise
 
 
-def collect_all_sources(config: dict, storage: Storage, run_id: int) -> list[NewsItem]:
+def collect_all_sources(config: dict, storage: Storage, run_id: int) -> tuple[list[NewsItem], list[NewsItem]]:
     items: list[NewsItem] = []
-    for source in (WechatApiSource(config), PortalSource(config)):
+    github_items: list[NewsItem] = []
+    for source in (WechatApiSource(config), PortalSource(config), GithubSource(config)):
         try:
             collected = source.collect()
-            items.extend(collected)
+            if source.name == "github":
+                github_items = collected
+            else:
+                items.extend(collected)
             _log(storage, run_id, "info", "source", source.name, f"count={len(collected)}")
         except Exception as exc:
             _log(storage, run_id, "error", "source", source.name, str(exc))
             logger.warning("Source failed: %s %s", source.name, exc)
-    return items
+    return items, github_items
 
 
 def sort_by_source_priority(items: list[NewsItem]) -> list[NewsItem]:

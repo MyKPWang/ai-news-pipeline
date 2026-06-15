@@ -5,7 +5,7 @@ from datetime import datetime
 from .models import NewsItem
 
 
-def build_publish_data(items: list[NewsItem], global_info: dict | None = None) -> dict:
+def build_publish_data(items: list[NewsItem], global_info: dict | None = None, github_trending: list | None = None) -> dict:
     global_info = global_info or {}
     categories = []
     for name in ("AI资讯", "智能硬件"):
@@ -16,11 +16,16 @@ def build_publish_data(items: list[NewsItem], global_info: dict | None = None) -
     # hot_items 直接取已发布文章的前5条 rewritten_title，与 HTML 正文标题保持一致
     hot_items = [item.rewritten_title for item in items[:5] if item.rewritten_title.strip()]
 
-    return {
+    result = {
         "hot_items": hot_items,
         "insight": global_info.get("insight", "") if global_info else "",
         "categories": categories,
     }
+
+    if github_trending:
+        result["github_trending"] = github_trending
+
+    return result
 
 
 def build_article_title(now: datetime | None = None) -> str:
