@@ -36,9 +36,9 @@
 <img src="{{ github_trending.image_url }}" style="width:100%;max-width:880px;display:block;margin:10px 0;" />
 {% endif %}
 {% if github_trending.repos %}
-<p style="font-size:13px;color:#666;line-height:2;margin-top:10px;">
+<p style="font-size:13px;color:#666;line-height:2;margin-top:10px;display:flex;flex-wrap:wrap;">
 {% for item in github_trending.repos %}
-[{{ loop.index }}] <a href="{{ item.link }}" target="_blank" style="color:#1890ff;text-decoration:none;">{{ item.link }}</a><br/>
+<span style="white-space:nowrap;margin-right:8px;">[{{ loop.index }}]</span><span style="word-break:break-all;"><a href="{{ item.link }}" target="_blank" style="color:#1890ff;text-decoration:none;">{{ item.link }}</a></span><br style="clear:both;"/>
 {% endfor %}
 </p>
 {% endif %}
