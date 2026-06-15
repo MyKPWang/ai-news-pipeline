@@ -163,7 +163,7 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
                 github_trending_image_url = upload_image_to_wechat(img_path, publish_config)
                 github_trending_data = {
                     "image_url": github_trending_image_url,
-                    "items": [
+                    "repos": [
                         {
                             "title": item.title,
                             "desc": item.desc,
