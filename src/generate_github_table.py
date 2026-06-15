@@ -4,33 +4,28 @@
 """
 import json
 import re
-import sys
 import time
 from pathlib import Path
 from typing import Optional
 
-# ---------------------------------------------------------------------------
-# LLM 调用（生成中文项目介绍）
-# ---------------------------------------------------------------------------
-
 MINI_MAX_API_KEY = ""
 MINI_MAX_BASE_URL = "https://api.minimaxi.chat/v1"
 
+# ---------------------------------------------------------------------------
+# LLM 调用
+# ---------------------------------------------------------------------------
 
 def _call_llm(prompt: str, max_tokens: int = 800, timeout: int = 60) -> str:
-    """调用 MiniMax LLM"""
     global MINI_MAX_API_KEY, MINI_MAX_BASE_URL
     if not MINI_MAX_API_KEY:
         try:
-            secret_path = Path.home() / ".openclaw" / "workspace" / "ai-news-pipeline" / "secrets.yaml"
             import yaml
-            with open(secret_path) as f:
+            with open(Path.home() / ".openclaw" / "workspace" / "ai-news-pipeline" / "secrets.yaml") as f:
                 secrets = yaml.safe_load(f)
-            MINI_MAX_API_KEY = secrets.get("minimax_api_key", "")
+            MINI_MAX_API_KEY = secrets.get("minimax_api", {}).get("api_key", "")
             MINI_MAX_BASE_URL = secrets.get("minimax_base_url", MINI_MAX_BASE_URL)
         except Exception:
             return ""
-
     if not MINI_MAX_API_KEY:
         return ""
 
@@ -60,7 +55,6 @@ def _call_llm(prompt: str, max_tokens: int = 800, timeout: int = 60) -> str:
 
 
 def fetch_github_readme(owner: str, repo: str) -> str:
-    """抓取 GitHub 项目 README"""
     import urllib.request
     for branch in ["main", "master"]:
         raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/README.md"
@@ -75,7 +69,6 @@ def fetch_github_readme(owner: str, repo: str) -> str:
     return ""
 
 
-# 5 天缓存
 _CACHE_PATH = Path.home() / ".openclaw" / "workspace" / "ai-news" / "github_desc_cache.json"
 _CACHE_TTL = 5 * 24 * 3600
 
@@ -97,7 +90,6 @@ def _save_cache(cache: dict):
 
 
 def generate_chinese_desc(owner: str, repo: str, fallback_desc: str) -> str:
-    """为项目生成中文介绍（80-150字），带5天缓存"""
     cache_key = f"{owner}/{repo}"
     now = time.time()
     cache = _load_cache()
@@ -131,7 +123,7 @@ def generate_chinese_desc(owner: str, repo: str, fallback_desc: str) -> str:
         result = re.sub(r"`[^`]*`", "", result)
         result = re.sub(r">\s*", "", result)
         result = re.sub(r"\n+", " ", result).strip()
-        if not result[-1] if result else False in "。！？":
+        if result and result[-1] not in "。！？":
             for punct in ("。", "！", "？"):
                 idx = result.rfind(punct)
                 if idx >= 0:
@@ -147,29 +139,29 @@ def generate_chinese_desc(owner: str, repo: str, fallback_desc: str) -> str:
 # HTML 模板
 # ---------------------------------------------------------------------------
 
-HTML_TEMPLATE = """<!DOCTYPE html>
+HTML_TEMPLATE = """
+<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{ font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #0d1117; color: #e6edf3; padding: 24px; }}
-  .header {{ text-align: center; margin-bottom: 20px; }}
-  .header .date {{ font-size: 13px; color: #7d8590; margin-top: 4px; }}
-  .header .subtitle {{ font-size: 13px; color: #7d8590; margin-top: 4px; }}
-  .table {{ width: 100%; border-collapse: collapse; }}
-  .table th {{ background: #161b22; color: #7d8590; font-size: 12px; font-weight: 600; text-align: left; padding: 10px 12px; border-bottom: 1px solid #30363d; }}
-  .table td {{ padding: 12px; border-bottom: 1px solid #21262d; vertical-align: top; font-size: 13px; line-height: 1.5; }}
-  .table tr:last-child td {{ border-bottom: none; }}
-  .rank {{ color: #7d8590; font-size: 12px; width: 40px; text-align: center; }}
-  .rank.top3 {{ color: #f0883e; font-weight: bold; }}
-  .repo-name {{ color: #58a6ff; font-weight: 600; font-size: 14px; }}
-  .repo-name a {{ color: inherit; text-decoration: none; }}
-  .desc {{ color: #8b949e; margin-top: 3px; font-size: 12px; }}
-  .stars {{ color: #f0883e; font-size: 12px; white-space: nowrap; }}
-  .lang {{ background: #1f6feb; color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 10px; margin-right: 6px; }}
-  .rank-cell {{ text-align: center; }}
-  .top-badge {{ background: #f0883e; color: #fff; font-size: 10px; padding: 2px 5px; border-radius: 3px; margin-left: 4px; }}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; background: #0d1117; color: #e6edf3; padding: 24px; }
+.header { text-align: center; margin-bottom: 20px; }
+.date { font-size: 13px; color: #7d8590; margin-top: 4px; }
+.subtitle { font-size: 13px; color: #7d8590; margin-top: 4px; }
+.table { width: 100%; border-collapse: collapse; }
+.table th { background: #161b22; color: #7d8590; font-size: 12px; font-weight: 600; text-align: left; padding: 10px 12px; border-bottom: 1px solid #30363d; }
+.table td { padding: 12px; border-bottom: 1px solid #21262d; vertical-align: top; font-size: 13px; line-height: 1.5; }
+.table tr:last-child td { border-bottom: none; }
+.rank { color: #7d8590; font-size: 12px; width: 40px; text-align: center; }
+.rank.top3 { color: #f0883e; font-weight: bold; }
+.repo-name { color: #58a6ff; font-weight: 600; font-size: 14px; }
+.repo-name a { color: inherit; text-decoration: none; }
+.desc { color: #8b949e; margin-top: 3px; font-size: 12px; }
+.stars { color: #f0883e; font-size: 12px; white-space: nowrap; }
+.rank-cell { text-align: center; }
+.top-badge { background: #f0883e; color: #fff; font-size: 10px; padding: 2px 5px; border-radius: 3px; margin-left: 4px; }
 </style>
 </head>
 <body>
@@ -202,32 +194,26 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 </tbody>
 </table>
 </body>
-</html>"""
+</html>
+"""
 
+
+# ---------------------------------------------------------------------------
+# 核心函数
+# ---------------------------------------------------------------------------
 
 def generate_github_trending_table(github_items: list, output_dir: Path) -> Optional[str]:
-    """
-    为 GitHub 趋势项目生成图片。
-
-    Args:
-        github_items: NewsItem 列表，每个 item.extra 包含 stars/forks/language
-        output_dir: 图片输出目录
-
-    Returns:
-        图片本地路径，或 None（失败时）
-    """
+    """生成 GitHub 趋势榜图片，返回本地路径或 None"""
     if not github_items:
         return None
 
     try:
         from jinja2 import Template
         from playwright.sync_api import sync_playwright
-        import concurrent.futures
     except ImportError as e:
         print(f"   ⚠️ 依赖缺失: {e}，跳过 GitHub 榜单图片生成")
         return None
 
-    # 并行生成中文介绍
     top10 = github_items[:10]
     repos = []
     for i, item in enumerate(top10):
@@ -296,7 +282,8 @@ def upload_image_to_wechat(img_path: str, config: dict) -> Optional[str]:
             return None
 
         with open(img_path, "rb") as f:
-            files = {"media": (img_path.split("/")[-1], f, "image/png")}
+            filename = img_path.split("/")[-1]
+            files = {"media": (filename, f, "image/png")}
             r = requests.post(
                 f"https://api.weixin.qq.com/cgi-bin/media/upload?access_token={token}&type=image",
                 files=files, timeout=30
@@ -305,16 +292,3 @@ def upload_image_to_wechat(img_path: str, config: dict) -> Optional[str]:
     except Exception as e:
         print(f"   ⚠️ 微信图片上传失败: {e}")
         return None
-
-
-if __name__ == "__main__":
-    # 测试用
-    from src.models import NewsItem
-    test_items = [
-        NewsItem(title="test/repo", url="https://github.com/test/repo", desc="test desc",
-                 source="github", extra={"stars": 1234})
-    ]
-    output = Path("wechat-publish-tool/output")
-    output.mkdir(parents=True, exist_ok=True)
-    path = generate_github_trending_table(test_items, output)
-    print(f"Result: {path}")
