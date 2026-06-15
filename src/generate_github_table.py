@@ -284,8 +284,9 @@ def upload_image_to_wechat(img_path: str, config: dict) -> Optional[str]:
         with open(img_path, "rb") as f:
             filename = img_path.split("/")[-1]
             files = {"media": (filename, f, "image/png")}
+            # uploadimg 返回 url，直接可用于文章内嵌图片
             r = requests.post(
-                f"https://api.weixin.qq.com/cgi-bin/media/upload?access_token={token}&type=image",
+                f"https://api.weixin.qq.com/cgi-bin/media/uploadimg?access_token={token}",
                 files=files, timeout=30
             ).json()
         return r.get("url")

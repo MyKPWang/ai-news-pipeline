@@ -161,6 +161,9 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
                 # 上传到微信素材库获取永久 URL
                 publish_config = config.get("wechat_publish", {})
                 github_trending_image_url = upload_image_to_wechat(img_path, publish_config)
+                if not github_trending_image_url:
+                    # 上传失败时用本地路径
+                    github_trending_image_url = img_path
                 github_trending_data = {
                     "image_url": github_trending_image_url,
                     "repos": [
