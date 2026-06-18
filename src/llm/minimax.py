@@ -47,7 +47,7 @@ class MiniMaxClient:
         index_map = {idx: item for idx, item in enumerate(items, 1)}
         selected: list[NewsItem] = []
         counts = {"AI资讯": 0, "智能硬件": 0}
-        limits = {"AI资讯": 10, "智能硬件": 4}
+        limits = {"AI资讯": 15, "智能硬件": 6}
 
         for row in selected_rows:
             try:

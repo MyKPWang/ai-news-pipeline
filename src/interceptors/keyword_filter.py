@@ -72,24 +72,50 @@ POSITIVE_PROTECTION_KEYWORDS = [
     "Agent",
     "智能体",
     "端侧",
+    "端侧模型",
+    "端侧推理",
+    "本地模型",
     "系统级",
+    "系统级AI",
+    "客户端AI",
     "操作系统",
     "客户端",
     "超级App",
+    "iOS",
+    "iPadOS",
+    "macOS",
+    "鸿蒙",
+    "HarmonyOS",
+    "安卓",
+    "Android",
     "小米",
     "苹果",
     "Apple",
     "华为",
+    "荣耀",
+    "Honor",
     "豆包",
     "通义",
     "千问",
     "DeepSeek",
     "Kimi",
     "MiniMax",
+    "车机",
     "NVIDIA",
     "机器人",
     "智能硬件",
     "芯片",
+]
+
+HARD_REMOVE_KEYWORDS = [
+    "招聘",
+    "求职",
+    "简历",
+    "面试",
+    "裁员",
+    "就业",
+    "招募",
+    "年薪",
 ]
 
 
@@ -148,6 +174,11 @@ def keyword_filter(items: list[NewsItem]) -> FilterDecision:
         matched = next((kw for kw in FILTER_KEYWORDS if kw.lower() in text.lower()), "")
         if not matched:
             kept.append(item)
+            continue
+
+        hard_remove = next((kw for kw in HARD_REMOVE_KEYWORDS if kw.lower() in text.lower()), "")
+        if hard_remove:
+            removed.append((item, hard_remove))
             continue
 
         positive = next((kw for kw in POSITIVE_PROTECTION_KEYWORDS if kw.lower() in text.lower()), "")
