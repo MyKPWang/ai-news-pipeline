@@ -58,13 +58,23 @@ class FilterAndDedupTest(unittest.TestCase):
         self.assertEqual([items[1]], result.kept)
         self.assertEqual(items[0], result.removed[0][0])
 
-    def test_keyword_filter_positive_protection(self):
-        item = NewsItem(title="小米 AI 团队招聘端侧大模型工程师", desc="系统级 AI 能力持续扩展")
+    def test_keyword_filter_keeps_mobile_and_edge_ai_signals(self):
+        harmony = NewsItem(title="HarmonyOS 发布系统级 AI 新特性", desc="新版系统加入端侧模型能力")
+        android = NewsItem(title="Android 端侧模型部署方案更新", desc="支持本地模型推理和 NPU 加速")
+        honor = NewsItem(title="荣耀手机系统级 AI 功能升级", desc="客户端 AI 能力覆盖相册和语音场景")
 
-        result = keyword_filter([item])
+        result = keyword_filter([harmony, android, honor])
 
-        self.assertEqual([item], result.kept)
-        self.assertEqual(item, result.protected[0][0])
+        self.assertEqual([harmony, android, honor], result.kept)
+
+    def test_keyword_filter_removes_hiring_and_layoff_even_when_ai_related(self):
+        hiring = NewsItem(title="小米 AI 团队招聘端侧大模型工程师", desc="系统级 AI 能力持续扩展")
+        layoff = NewsItem(title="某 AI 公司启动裁员", desc="涉及模型团队和客户端团队。")
+
+        result = keyword_filter([hiring, layoff])
+
+        self.assertEqual([], result.kept)
+        self.assertEqual([hiring, layoff], [item for item, _reason in result.removed])
 
     def test_keyword_filter_removes_financing_main_events_even_when_ai_related(self):
         unitree = NewsItem(
@@ -162,19 +172,68 @@ class LlmLogicTest(unittest.TestCase):
         self.assertIn("融资不是核心事实", prompt)
         self.assertIn("明确技术、产品、论文或模型能力进展", prompt)
 
-    def test_selection_prompt_prioritizes_policy_and_commercialization_signals(self):
+    def test_selection_prompt_prioritizes_mobile_edge_and_super_ai_apps(self):
+        mobile = NewsItem(title="苹果发布 iOS 系统级 AI 新特性", desc="新能力覆盖端侧多模态和本地智能体。")
+        edge_model = NewsItem(title="Android 端侧模型部署方案更新", desc="支持轻量模型在手机 NPU 本地运行。")
+        super_app = NewsItem(title="千问 App 开放第三方智能体接入", desc="超级 AI App 扩展插件生态。")
+        prompt = build_global_selection_prompt([mobile, edge_model, super_app])
+
+        self.assertIn("移动端技术", prompt)
+        self.assertIn("Apple、iOS、iPadOS、macOS、鸿蒙、HarmonyOS、安卓、Android、小米、荣耀、华为", prompt)
+        self.assertIn("端侧模型", prompt)
+        self.assertIn("端侧模型部署、端侧推理、本地运行、轻量模型", prompt)
+        self.assertIn("端侧 AI 技术", prompt)
+        self.assertIn("系统级 AI、客户端 AI、端云协同、本地智能体", prompt)
+        self.assertIn("超级 AI App", prompt)
+        self.assertIn("千问、豆包、DeepSeek、Kimi、MiniMax", prompt)
+        self.assertIn("AI资讯：最多 15 条", prompt)
+        self.assertIn("智能硬件：最多 6 条", prompt)
+
+    def test_selection_prompt_only_keeps_policy_and_commercialization_when_core_direction_related(self):
         policy = NewsItem(title="上海发布AI产业扶持政策", desc="支持算力、模型和智能硬件生态建设。")
         commercial = NewsItem(title="AI产品开放付费API", desc="多家企业客户已接入，开发者生态合作扩大。")
         exam = NewsItem(title="高考期间AI平台禁用拍题", desc="平台发布考试期间功能限制。")
         prompt = build_global_selection_prompt([policy, commercial, exam])
 
-        self.assertIn("产业政策风向标", prompt)
-        self.assertIn("扶持、监管、标准、准入、政府采购、产业规划", prompt)
-        self.assertIn("商业化落地信号", prompt)
-        self.assertIn("付费/API/订阅/价格策略、企业客户采用、生态合作、渠道接入", prompt)
+        self.assertIn("政策、监管、标准、商业化、客户采用、生态合作", prompt)
+        self.assertIn("只有直接关联移动端 AI、移动端技术、端侧模型、端侧 AI 技术或超级 AI App 时才可入选", prompt)
         self.assertIn("融资、IPO、估值、股价、普通投资", prompt)
+        self.assertIn("上市", prompt)
+        self.assertIn("招聘、裁员", prompt)
         self.assertIn("考试期间禁用拍题、平台自律/治理年报、单纯榜单得分", prompt)
-        self.assertIn("产品落地或商业化采用强相关", prompt)
+
+    def test_select_items_uses_relaxed_category_limits(self):
+        items = [NewsItem(title=f"AI资讯{i}", desc="移动端 AI 动态") for i in range(17)]
+        items.extend(NewsItem(title=f"硬件{i}", desc="智能眼镜 AI 功能") for i in range(8))
+        for item in items:
+            item.ensure_id()
+
+        client = MiniMaxClient.__new__(MiniMaxClient)
+        client.api_config = {"selection_temperature": 0.2}
+
+        def fake_call_json(self, **_kwargs):
+            return {
+                "hot_topics": [],
+                "insight": "",
+                "selected": [
+                    {
+                        "index": idx,
+                        "category": "AI资讯" if idx <= 17 else "智能硬件",
+                        "priority": idx,
+                        "core_fact": "核心事实",
+                        "reason": "相关",
+                    }
+                    for idx in range(1, 26)
+                ],
+            }
+
+        client._call_json = types.MethodType(fake_call_json, client)
+
+        selected, _info = MiniMaxClient.select_items(client, items)
+
+        self.assertEqual(21, len(selected))
+        self.assertEqual(15, len([item for item in selected if item.category == "AI资讯"]))
+        self.assertEqual(6, len([item for item in selected if item.category == "智能硬件"]))
 
     def test_parse_json_response_from_plain_and_markdown_text(self):
         self.assertEqual({"items": []}, parse_json_response('{"items": []}'))
@@ -449,7 +508,7 @@ class MockPipelineTest(unittest.TestCase):
                 "wechat_publish": {"auto_publish": False},
             }
 
-            with patch("src.pipeline.collect_all_sources", return_value=source_items), patch(
+            with patch("src.pipeline.collect_all_sources", return_value=(source_items, [])), patch(
                 "src.pipeline.MiniMaxClient", FakeMiniMaxClient
             ), patch("src.pipeline.render_wechat_html", return_value=str(Path(tmp) / "wechat.html")) as render_html:
                 result = run_pipeline(config, no_publish=True)
@@ -522,7 +581,7 @@ class MockPipelineTest(unittest.TestCase):
                 "wechat_publish": {"auto_publish": False},
             }
 
-            with patch("src.pipeline.collect_all_sources", side_effect=lambda *_args: make_source_items()), patch(
+            with patch("src.pipeline.collect_all_sources", side_effect=lambda *_args: (make_source_items(), [])), patch(
                 "src.pipeline.MiniMaxClient", FakeMiniMaxClient
             ), patch("src.pipeline.render_wechat_html", return_value=str(Path(tmp) / "wechat.html")):
                 first = run_pipeline(config, no_publish=True)
