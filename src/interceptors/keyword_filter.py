@@ -59,6 +59,20 @@ FILTER_KEYWORDS = [
     "就业",
     "招募",
     "年薪",
+    "人事任命",
+    "任命",
+    "高管",
+    "CEO",
+    "CTO",
+    "CFO",
+    "负责人",
+    "离职",
+    "履新",
+    "升任",
+    "出任",
+    "掌舵",
+    "换帅",
+    "组织架构调整",
     "名创优品",
     "持股",
 ]
@@ -116,6 +130,20 @@ HARD_REMOVE_KEYWORDS = [
     "就业",
     "招募",
     "年薪",
+    "人事任命",
+    "任命",
+    "高管",
+    "CEO",
+    "CTO",
+    "CFO",
+    "负责人",
+    "离职",
+    "履新",
+    "升任",
+    "出任",
+    "掌舵",
+    "换帅",
+    "组织架构调整",
 ]
 
 
@@ -141,6 +169,11 @@ FINANCING_MAIN_EVENT_PATTERNS = [
     r"股权融资",
     r"收购",
     r"并购",
+]
+
+PERSONNEL_MAIN_EVENT_PATTERNS = [
+    r"(加入|加盟).{0,20}(公司|团队|董事会|管理层|管委会)",
+    r"(公司|团队|董事会|管理层).{0,20}(加入|加盟)",
 ]
 
 
@@ -177,6 +210,8 @@ def keyword_filter(items: list[NewsItem]) -> FilterDecision:
             continue
 
         hard_remove = next((kw for kw in HARD_REMOVE_KEYWORDS if kw.lower() in text.lower()), "")
+        if not hard_remove:
+            hard_remove = _first_pattern_match(text, PERSONNEL_MAIN_EVENT_PATTERNS)
         if hard_remove:
             removed.append((item, hard_remove))
             continue

@@ -76,6 +76,31 @@ class FilterAndDedupTest(unittest.TestCase):
         self.assertEqual([], result.kept)
         self.assertEqual([hiring, layoff], [item for item, _reason in result.removed])
 
+    def test_keyword_filter_removes_personnel_changes_even_when_ai_related(self):
+        ceo = NewsItem(title="某 AI 公司任命新 CEO", desc="新任高管将负责模型业务。")
+        executive_leave = NewsItem(title="DeepSeek 高管离职", desc="涉及大模型团队管理层变化。")
+        owner_change = NewsItem(title="千问负责人调整", desc="超级 AI App 团队组织架构变化。")
+        org_change = NewsItem(title="苹果 AI 团队组织架构调整", desc="系统级 AI 负责人介绍后续规划。")
+
+        result = keyword_filter([ceo, executive_leave, owner_change, org_change])
+
+        self.assertEqual([], result.kept)
+        self.assertEqual(
+            [ceo, executive_leave, owner_change, org_change],
+            [item for item, _reason in result.removed],
+        )
+
+    def test_keyword_filter_removes_personnel_wrapped_technical_news(self):
+        item = NewsItem(
+            title="端侧模型负责人介绍新版系统级 AI 功能",
+            desc="文章以负责人访谈形式介绍团队人事和产品规划。",
+        )
+
+        result = keyword_filter([item])
+
+        self.assertEqual([], result.kept)
+        self.assertEqual([item], [removed for removed, _reason in result.removed])
+
     def test_keyword_filter_removes_financing_main_events_even_when_ai_related(self):
         unitree = NewsItem(
             title="宇树科技科创板IPO将于6月1日上会，计划募资42亿元",
@@ -200,6 +225,8 @@ class LlmLogicTest(unittest.TestCase):
         self.assertIn("融资、IPO、估值、股价、普通投资", prompt)
         self.assertIn("上市", prompt)
         self.assertIn("招聘、裁员", prompt)
+        self.assertIn("人事任命、高管变动、负责人调整、组织架构调整", prompt)
+        self.assertIn("人事信息不是核心事实", prompt)
         self.assertIn("考试期间禁用拍题、平台自律/治理年报、单纯榜单得分", prompt)
 
     def test_select_items_uses_relaxed_category_limits(self):
