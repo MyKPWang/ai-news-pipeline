@@ -30,7 +30,7 @@ def build_publish_data(items: list[NewsItem], global_info: dict | None = None, g
 
 def build_article_title(now: datetime | None = None) -> str:
     now = now or datetime.now()
-    return f"AI资讯速览 | {now.strftime('%Y-%m-%d')}"
+    return f"移动端AI资讯速览 | {now.strftime('%Y-%m-%d')}"
 
 
 def collect_sources(items: list[NewsItem]) -> list[str]:
