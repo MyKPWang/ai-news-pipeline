@@ -584,8 +584,7 @@ def handle_supplement(
     logger.info("Supplements: run_id=%s, numbers=%s, selected=%d", run_id, numbers, len(selected_for_rewrite))
 
     # 6. LLM 重写
-    llm_config = config.get("llm", {})
-    llm_client = MiniMaxClient(llm_config, storage, run_id)
+    llm_client = MiniMaxClient(config, storage, run_id)
     try:
         rewritten = llm_client.rewrite_items(selected_for_rewrite)
     except Exception as exc:
