@@ -388,15 +388,56 @@ class Storage:
             json.dump([item.to_dict() for item in items], f, ensure_ascii=False, indent=2)
         return str(output)
 
+    def get_review_items_flat(
+        self,
+        run_id: int,
+        filter_stages: list[str],
+    ) -> list[NewsItem]:
+        """获取 review 文章的扁平列表（按 publish_time 降序）。"""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select
+                    fe.raw_item_id,
+                    ri.item_id,
+                    ri.title,
+                    ri.source,
+                    ri.url,
+                    ri.desc,
+                    ri.publish_time,
+                    ri.time_text,
+                    ri.extra_json
+                from filter_events fe
+                join raw_items ri on ri.id = fe.raw_item_id
+                where fe.run_id = ? and fe.action = 'review' and fe.stage in ({seq})
+                order by ri.publish_time desc
+                """.format(seq=",".join("?" for _ in filter_stages)),
+                [run_id] + filter_stages,
+            ).fetchall()
+
+        items: list[NewsItem] = []
+        for row in rows:
+            extra = json.loads(row[8]) if row[8] else {}
+            item = NewsItem(
+                id=str(row[1]),
+                title=row[2] or "",
+                source=row[3] or "",
+                url=row[4] or "",
+                desc=row[5] or "",
+                publish_time=row[6],
+                time_text=row[7] or "",
+                extra=extra,
+            )
+            item.ensure_id()
+            items.append(item)
+        return items
+
     def get_review_items_by_filter(
         self,
         run_id: int,
         filter_stages: list[str],
     ) -> dict[str, list[NewsItem]]:
-        """按 filter 类型分组获取 review 文章列表。
-
-        filter_stages: ['time_filter', 'quality_filter', 'keyword_filter', 'rewrite_check']
-        """
+        """按 filter 类型分组获取 review 文章列表（兼容保留）。"""
         with self.connect() as conn:
             rows = conn.execute(
                 """

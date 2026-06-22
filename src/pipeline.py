@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -14,10 +13,14 @@ from .interceptors.bge_dedup import bge_dedup
 from .interceptors.dedup import exact_dedup
 from .interceptors.keyword_filter import keyword_filter
 from .llm.minimax import LlmError, MiniMaxClient
+from .logging_utils import setup_logging
 from .models import NewsItem, PipelineResult
 from .publisher import publish_to_wechat_tool, render_wechat_html
 from .sources.github import GithubSource
 from .sources.portals import PortalSource
+from .sources.wechat import WechatApiSource
+from .storage import Storage
+from .time_utils import format_time_text, parse_publish_time
 from .sources.wechat import WechatApiSource
 from .storage import Storage
 from .time_utils import format_time_text, parse_publish_time
@@ -418,6 +421,29 @@ _FILTER_LABELS: dict[str, str] = {
 }
 
 
+def _review_run_info_path() -> Path:
+    return Path(__file__).parent.parent / ".latest_review_run.json"
+
+
+def _save_review_run(run_id: int, run_date: str) -> None:
+    path = _review_run_info_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump({"run_id": run_id, "run_date": run_date}, f)
+
+
+def _load_latest_review_run() -> tuple[int, str] | None:
+    path = _review_run_info_path()
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        return int(data.get("run_id", 0)), str(data.get("run_date", ""))
+    except Exception:
+        return None
+
+
 def _send_review_list_to_feishu(
     config: dict,
     storage: Storage,
@@ -425,7 +451,7 @@ def _send_review_list_to_feishu(
     published_count: int,
     run_date: str,
 ) -> None:
-    """从 storage 查询 review 列表，按配置组装消息并发送飞书。"""
+    """从 storage 查询 review 列表，统一编号后发送飞书。"""
     review_cfg = config.get("review_list", {})
     if not review_cfg.get("feishu_enabled", False):
         return
@@ -439,7 +465,6 @@ def _send_review_list_to_feishu(
         logger.warning("Feishu review list: missing app_id/app_secret/user_id in config")
         return
 
-    # 确定要包含哪些 filter 类型
     stages: list[str] = []
     if review_cfg.get("include_time_filter", False):
         stages.append("time_filter")
@@ -448,55 +473,48 @@ def _send_review_list_to_feishu(
     if review_cfg.get("include_keyword_filter", True):
         stages.append("keyword_filter")
     stages.append("rewrite_check")
-
     if not stages:
         return
 
-    review_by_filter = storage.get_review_items_by_filter(run_id, stages)
+    # 保存 run_id，用户回复「补充 X」时我知道查哪批
+    _save_review_run(run_id, run_date)
 
-    # 构建消息
-    lines: list[str] = []
-    lines.append(f"📋 **{run_date} 备选文章列表**")
-    lines.append("")
-    lines.append(f"已自动发布：{published_count} 条 | 以下为未被选用的备选文章：")
-    lines.append("")
+    # 扁平列表，统一编号
+    items = storage.get_review_items_flat(run_id, stages)
 
-    total_review = 0
-    for stage, items in review_by_filter.items():
-        if not items:
-            continue
-        label = _FILTER_LABELS.get(stage, stage)
-        lines.append(f"**{label}**（{len(items)} 条）")
+    lines_out: list[str] = []
+    lines_out.append(f"📋 **{run_date} 备选文章列表**")
+    lines_out.append("")
+    lines_out.append(f"已自动发布：{published_count} 条 | 以下为未被选用的备选文章（共 {len(items)} 条）：")
+    lines_out.append("")
+
+    if not items:
+        lines_out.append("（无备选文章）")
+        lines_out.append("")
+    else:
         for i, item in enumerate(items, 1):
             title = item.title or "(无标题)"
             url = item.url or ""
             source = item.source or ""
             time_text = item.time_text or ""
-            # 截断过长标题
-            if len(title) > 40:
-                title = title[:40] + "..."
+            if len(title) > 45:
+                title = title[:45] + "..."
             line = f"{i}. {title}"
             if source:
                 line += f" - {source}"
             if time_text:
                 line += f" ({time_text})"
-            lines.append(line)
+            lines_out.append(line)
             if url:
-                lines.append(f"   🔗 {url}")
-        lines.append("")
-        total_review += len(items)
+                lines_out.append(f"   🔗 {url}")
 
-    if total_review == 0:
-        lines.append("（无备选文章）")
-        lines.append("")
+    lines_out.append("")
+    lines_out.append("---")
+    lines_out.append("回复格式：如需补充，请直接回复「补充 + 编号」")
+    lines_out.append("示例：补充 1、3、5")
 
-    lines.append("---")
-    lines.append("回复格式：如需补充，请直接回复「补充 + 编号」")
-    lines.append("示例：补充 1、3、5")
+    text = "\n".join(lines_out)
 
-    text = "\n".join(lines)
-
-    # 获取 token 并发送
     token = _get_feishu_token(app_id, app_secret)
     if not token:
         logger.warning("Feishu review list: could not get access token")
@@ -504,6 +522,7 @@ def _send_review_list_to_feishu(
 
     sent = _send_feishu_text(user_open_id, text, token)
     if sent:
-        logger.info("Feishu review list sent: %d items across %d stages", total_review, len(stages))
+        logger.info("Feishu review list sent: %d items", len(items))
     else:
         logger.warning("Failed to send Feishu review list")
+
