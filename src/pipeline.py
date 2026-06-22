@@ -594,6 +594,11 @@ def handle_supplement(
     if not rewritten:
         return False, "LLM 重写返回空结果"
 
+    # 7a. 补充的 article 可能没有 category，加上默认值以确保在 HTML 中展示
+    for item in rewritten:
+        if not item.category:
+            item.category = "AI资讯"
+
     # 7. 追加到已有发布列表
     combined_items = existing + rewritten
     logger.info("Supplements: existing=%d + rewritten=%d = combined=%d",
