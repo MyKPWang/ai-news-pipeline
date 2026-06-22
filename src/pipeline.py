@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
 import logging
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
+
+import requests
 
 from .aggregator import build_article_title, build_publish_data, collect_sources
 from .interceptors.bge_dedup import bge_dedup
@@ -185,6 +190,9 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         should_publish = should_upload(config, no_publish, selected_items, publishable_items, review_items)
         if should_publish:
             published = publish_to_wechat_tool(data, title, sources, config)
+            # 发完草稿箱后，发送 review 列表到飞书
+            if published:
+                _send_review_list_to_feishu(config, storage, run_id, len(publishable_items), run_date)
 
         export_outputs(config, storage, run_date, raw_items, publishable_items, review_items)
         status = "success" if published or no_publish else "partial"
@@ -353,3 +361,149 @@ def _log(storage: Storage, run_id: int, level: str, module: str, event: str, mes
         "%s %s", event, message
     )
     storage.add_app_log(run_id, level, module, event, message)
+
+
+# ---------------------------------------------------------------
+# Feishu review list notification
+# ---------------------------------------------------------------
+
+def _get_feishu_token(app_id: str, app_secret: str, timeout: int = 10) -> str | None:
+    """获取 Feishu 应用_access_token。"""
+    if not app_id or not app_secret:
+        return None
+    try:
+        resp = requests.post(
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            json={"app_id": app_id, "app_secret": app_secret},
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code") == 0:
+            return data.get("tenant_access_token")
+    except Exception as exc:
+        logger.warning("Failed to get Feishu token: %s", exc)
+    return None
+
+
+def _send_feishu_text(user_open_id: str, text: str, token: str, timeout: int = 20) -> bool:
+    """发送富文本消息给指定用户。"""
+    try:
+        resp = requests.post(
+            "https://open.feishu.cn/open-apis/im/v1/messages",
+            params={"receive_id_type": "open_id"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "receive_id": user_open_id,
+                "msg_type": "text",
+                "content": json.dumps({"text": text}, ensure_ascii=False),
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        return resp.json().get("code") == 0
+    except Exception as exc:
+        logger.warning("Failed to send Feishu message: %s", exc)
+        return False
+
+
+_FILTER_LABELS: dict[str, str] = {
+    "time_filter": "【超时过滤】",
+    "quality_filter": "【质量过滤】",
+    "keyword_filter": "【关键词过滤】",
+    "rewrite_check": "【重写校验】",
+}
+
+
+def _send_review_list_to_feishu(
+    config: dict,
+    storage: Storage,
+    run_id: int,
+    published_count: int,
+    run_date: str,
+) -> None:
+    """从 storage 查询 review 列表，按配置组装消息并发送飞书。"""
+    review_cfg = config.get("review_list", {})
+    if not review_cfg.get("feishu_enabled", False):
+        return
+
+    secrets = config.get("_secrets", {})
+    feishu_cfg = secrets.get("feishu", {})
+    app_id = str(feishu_cfg.get("app_id", "")).strip()
+    app_secret = str(feishu_cfg.get("app_secret", "")).strip()
+    user_open_id = str(review_cfg.get("feishu_user_id", "")).strip()
+    if not app_id or not app_secret or not user_open_id:
+        logger.warning("Feishu review list: missing app_id/app_secret/user_id in config")
+        return
+
+    # 确定要包含哪些 filter 类型
+    stages: list[str] = []
+    if review_cfg.get("include_time_filter", False):
+        stages.append("time_filter")
+    if review_cfg.get("include_quality_filter", True):
+        stages.append("quality_filter")
+    if review_cfg.get("include_keyword_filter", True):
+        stages.append("keyword_filter")
+    stages.append("rewrite_check")
+
+    if not stages:
+        return
+
+    review_by_filter = storage.get_review_items_by_filter(run_id, stages)
+
+    # 构建消息
+    lines: list[str] = []
+    lines.append(f"📋 **{run_date} 备选文章列表**")
+    lines.append("")
+    lines.append(f"已自动发布：{published_count} 条 | 以下为未被选用的备选文章：")
+    lines.append("")
+
+    total_review = 0
+    for stage, items in review_by_filter.items():
+        if not items:
+            continue
+        label = _FILTER_LABELS.get(stage, stage)
+        lines.append(f"**{label}**（{len(items)} 条）")
+        for i, item in enumerate(items, 1):
+            title = item.title or "(无标题)"
+            url = item.url or ""
+            source = item.source or ""
+            time_text = item.time_text or ""
+            # 截断过长标题
+            if len(title) > 40:
+                title = title[:40] + "..."
+            line = f"{i}. {title}"
+            if source:
+                line += f" - {source}"
+            if time_text:
+                line += f" ({time_text})"
+            lines.append(line)
+            if url:
+                lines.append(f"   🔗 {url}")
+        lines.append("")
+        total_review += len(items)
+
+    if total_review == 0:
+        lines.append("（无备选文章）")
+        lines.append("")
+
+    lines.append("---")
+    lines.append("回复格式：如需补充，请直接回复「补充 + 编号」")
+    lines.append("示例：补充 1、3、5")
+
+    text = "\n".join(lines)
+
+    # 获取 token 并发送
+    token = _get_feishu_token(app_id, app_secret)
+    if not token:
+        logger.warning("Feishu review list: could not get access token")
+        return
+
+    sent = _send_feishu_text(user_open_id, text, token)
+    if sent:
+        logger.info("Feishu review list sent: %d items across %d stages", total_review, len(stages))
+    else:
+        logger.warning("Failed to send Feishu review list")

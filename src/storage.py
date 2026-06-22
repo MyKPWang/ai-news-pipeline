@@ -387,3 +387,51 @@ class Storage:
         with output.open("w", encoding="utf-8") as f:
             json.dump([item.to_dict() for item in items], f, ensure_ascii=False, indent=2)
         return str(output)
+
+    def get_review_items_by_filter(
+        self,
+        run_id: int,
+        filter_stages: list[str],
+    ) -> dict[str, list[NewsItem]]:
+        """按 filter 类型分组获取 review 文章列表。
+
+        filter_stages: ['time_filter', 'quality_filter', 'keyword_filter', 'rewrite_check']
+        """
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select
+                    fe.stage,
+                    ri.item_id,
+                    ri.title,
+                    ri.source,
+                    ri.url,
+                    ri.desc,
+                    ri.publish_time,
+                    ri.time_text,
+                    ri.extra_json
+                from filter_events fe
+                join raw_items ri on ri.id = fe.raw_item_id
+                where fe.run_id = ? and fe.action = 'review' and fe.stage in ({seq})
+                order by fe.stage, ri.publish_time desc
+                """.format(seq=",".join("?" for _ in filter_stages)),
+                [run_id] + filter_stages,
+            ).fetchall()
+
+        result: dict[str, list[NewsItem]] = {s: [] for s in filter_stages}
+        for row in rows:
+            stage = row[0]
+            extra = json.loads(row[8]) if row[8] else {}
+            item = NewsItem(
+                id=str(row[1]),
+                title=row[2] or "",
+                source=row[3] or "",
+                url=row[4] or "",
+                desc=row[5] or "",
+                publish_time=row[6],
+                time_text=row[7] or "",
+                extra=extra,
+            )
+            item.ensure_id()
+            result[stage].append(item)
+        return result
