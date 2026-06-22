@@ -197,6 +197,10 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         export_outputs(config, storage, run_date, raw_items, publishable_items, review_items)
         status = "success" if published or no_publish else "partial"
         storage.finish_run(run_id, status, len(raw_items), len(selected_items), len(publishable_items))
+        # 保存 github_trending_data 供 supplement 使用
+        if github_trending_data:
+            _save_review_run(run_id, run_date)
+            _save_github_data(github_trending_data)
         return PipelineResult(
             run_id=run_id,
             raw_items=raw_items,
@@ -441,6 +445,29 @@ def _load_latest_review_run() -> tuple[int, str] | None:
         return None
 
 
+def _github_data_path() -> Path:
+    return Path(__file__).parent.parent / ".latest_github_data.json"
+
+
+def _save_github_data(github_trending_data: dict | None) -> None:
+    if github_trending_data is None:
+        return
+    path = _github_data_path()
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(github_trending_data, f, ensure_ascii=False)
+
+
+def _load_github_data() -> dict | None:
+    path = _github_data_path()
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 def _send_review_list_to_feishu(
     config: dict,
     storage: Storage,
@@ -609,36 +636,11 @@ def handle_supplement(
     sources = collect_sources(combined_items)
     data = build_publish_data(combined_items)
 
-    # GitHub 趋势榜（复用已有逻辑）
-    github_trending_data = None
-    github_items: list[NewsItem] = []
-    try:
-        from .generate_github_table import generate_github_trending_table, upload_image_to_wechat
-        # 从配置获取 GitHub 列表并抓取
-        github_cfg = config.get("sources", {}).get("github", {})
-        github_sources = github_cfg.get("repos", []) if isinstance(github_cfg, dict) else []
-        if github_sources:
-            github_cls = GithubSource(github_cfg)
-            github_items = github_cls.fetch() or []
-            logger.info("Supplement: fetched %d github items", len(github_items))
-        if github_items:
-            output_dir = Path(__file__).parent.parent / "wechat-publish-tool" / "output"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            img_path = generate_github_trending_table(github_items, output_dir)
-            if img_path:
-                publish_config = config.get("wechat_publish", {})
-                github_trending_image_url = upload_image_to_wechat(img_path, publish_config)
-                if not github_trending_image_url:
-                    github_trending_image_url = img_path
-                github_trending_data = {
-                    "image_url": github_trending_image_url,
-                    "repos": [{"title": item.title, "desc": item.desc} for item in github_items[:10]],
-                }
-    except Exception as exc:
-        logger.warning("Supplement github table skipped: %s", exc)
-
+    # GitHub 趋势榜（直接复用旧草稿的数据，不重新生成）
+    github_trending_data = _load_github_data()
     if github_trending_data:
         data["github_trending"] = github_trending_data
+        logger.info("Supplement: reused existing github_trending_data")
 
     html_path = render_wechat_html(data, title, sources, config)
 
