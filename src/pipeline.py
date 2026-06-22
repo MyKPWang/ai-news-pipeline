@@ -588,7 +588,7 @@ def handle_supplement(
 
     # 6. LLM 重写
     llm_config = config.get("llm", {})
-    llm_client = MiniMaxClient(llm_config)
+    llm_client = MiniMaxClient(llm_config, storage, run_id)
     try:
         rewritten = llm_client.rewrite_items(selected_for_rewrite)
     except Exception as exc:
