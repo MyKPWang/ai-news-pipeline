@@ -631,10 +631,18 @@ def handle_supplement(
     logger.info("Supplements: existing=%d + rewritten=%d = combined=%d",
                  len(existing), len(rewritten), len(combined_items))
 
-    # 8. 重新构建 HTML
+    # 8. 重新生成今日洞察（用所有文章）
+    try:
+        _, global_info = llm_client.select_items(combined_items)
+        logger.info("Supplement: new insight=%s", str(global_info.get("insight", ""))[:80])
+    except Exception as exc:
+        logger.warning("Supplement: failed to generate insight: %s", exc)
+        global_info = {"hot_topics": [], "insight": "", "selected": []}
+
+    # 9. 重新构建 HTML
     title = build_article_title()
     sources = collect_sources(combined_items)
-    data = build_publish_data(combined_items)
+    data = build_publish_data(combined_items, global_info)
 
     # GitHub 趋势榜（直接复用旧草稿的数据，不重新生成）
     github_trending_data = _load_github_data()
