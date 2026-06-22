@@ -193,9 +193,6 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         should_publish = should_upload(config, no_publish, selected_items, publishable_items, review_items)
         if should_publish:
             published = publish_to_wechat_tool(data, title, sources, config)
-            # 发完草稿箱后，发送 review 列表到飞书
-            if published:
-                _send_review_list_to_feishu(config, storage, run_id, len(publishable_items), run_date)
 
         export_outputs(config, storage, run_date, raw_items, publishable_items, review_items)
         status = "success" if published or no_publish else "partial"
