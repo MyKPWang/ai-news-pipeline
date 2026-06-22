@@ -526,3 +526,169 @@ def _send_review_list_to_feishu(
     else:
         logger.warning("Failed to send Feishu review list")
 
+
+
+# ---------------------------------------------------------------
+# Supplement handler: user picks items to add to draft
+# ---------------------------------------------------------------
+
+def handle_supplement(
+    user_input: str,
+    config: dict,
+    storage: Storage,
+) -> tuple[bool, str]:
+    """处理用户「补充 X、Y」请求。
+
+    Returns (success, message).
+    """
+    # 1. 解析编号
+    numbers = _parse_supplement_numbers(user_input)
+    if not numbers:
+        return False, "无法解析编号，请使用「补充 1、3、5」格式"
+
+    # 2. 读取最近一次 review run
+    run_info = _load_latest_review_run()
+    if not run_info:
+        return False, "未找到最近的 review 记录，请先触发一次采集任务"
+    run_id, run_date = run_info
+
+    # 3. 确认 run_id 对应的草稿箱已有内容（避免乱补充）
+    existing = storage.get_published_items_for_run(run_id)
+    if not existing:
+        return False, f"run_id={run_id} 没有已发布的文章，请先触发采集生成初稿"
+
+    # 4. 获取 review 列表
+    review_cfg = config.get("review_list", {})
+    stages: list[str] = []
+    if review_cfg.get("include_time_filter", False):
+        stages.append("time_filter")
+    if review_cfg.get("include_quality_filter", True):
+        stages.append("quality_filter")
+    if review_cfg.get("include_keyword_filter", True):
+        stages.append("keyword_filter")
+    stages.append("rewrite_check")
+    review_items = storage.get_review_items_flat(run_id, stages)
+
+    # 5. 按编号选出文章（编号从 1 开始）
+    selected_for_rewrite: list[NewsItem] = []
+    invalid_nums: list[int] = []
+    for num in numbers:
+        idx = num - 1
+        if idx < 0 or idx >= len(review_items):
+            invalid_nums.append(num)
+        else:
+            selected_for_rewrite.append(review_items[idx])
+
+    if invalid_nums:
+        return False, f"编号 {invalid_nums} 超出范围，有效范围 1～{len(review_items)}"
+    if not selected_for_rewrite:
+        return False, "未选中任何文章"
+
+    logger.info("Supplements: run_id=%s, numbers=%s, selected=%d", run_id, numbers, len(selected_for_rewrite))
+
+    # 6. LLM 重写
+    llm_config = config.get("llm", {})
+    llm_client = MiniMaxClient(llm_config)
+    try:
+        rewritten = llm_client.rewrite_items(selected_for_rewrite)
+    except Exception as exc:
+        logger.error("Supplement rewrite failed: %s", exc)
+        return False, f"LLM 重写失败：{exc}"
+
+    if not rewritten:
+        return False, "LLM 重写返回空结果"
+
+    # 7. 追加到已有发布列表
+    combined_items = existing + rewritten
+    logger.info("Supplements: existing=%d + rewritten=%d = combined=%d",
+                 len(existing), len(rewritten), len(combined_items))
+
+    # 8. 重新构建 HTML
+    title = build_article_title()
+    sources = collect_sources(combined_items)
+    data = build_publish_data(combined_items)
+
+    # GitHub 趋势榜（复用已有逻辑）
+    github_trending_data = None
+    github_items: list[NewsItem] = []
+    try:
+        from .generate_github_table import generate_github_trending_table, upload_image_to_wechat
+        output_dir = Path(__file__).parent.parent / "wechat-publish-tool" / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        img_path = generate_github_trending_table(github_items, output_dir)
+        if img_path:
+            publish_config = config.get("wechat_publish", {})
+            github_trending_image_url = upload_image_to_wechat(img_path, publish_config)
+            if not github_trending_image_url:
+                github_trending_image_url = img_path
+            github_trending_data = {"image_url": github_trending_image_url, "repos": []}
+    except Exception as exc:
+        logger.warning("Supplement github table skipped: %s", exc)
+
+    if github_trending_data:
+        data["github_trending"] = github_trending_data
+
+    html_path = render_wechat_html(data, title, sources, config)
+
+    # 9. 推送到草稿箱（强制覆盖）
+    publish_cfg = config.get("wechat_publish", {})
+    is_dry = not publish_cfg.get("auto_publish", False)
+    try:
+        published = publish_to_wechat_tool(data, title, sources, config)
+    except Exception as exc:
+        logger.error("Supplement publish failed: %s", exc)
+        return False, f"推送草稿箱失败：{exc}"
+
+    if not published and not is_dry:
+        return False, "推送草稿箱失败（auto_publish=true）"
+
+    # 10. 发飞书通知
+    _notify_supplement_done(config, len(rewritten), title, run_date)
+
+    logger.info("Supplement done: added %d items, draft updated", len(rewritten))
+    return True, f"已补充 {len(rewritten)} 条文章并更新草稿箱"
+
+
+def _notify_supplement_done(
+    config: dict,
+    added_count: int,
+    title: str,
+    run_date: str,
+) -> None:
+    review_cfg = config.get("review_list", {})
+    if not review_cfg.get("feishu_enabled", False):
+        return
+    secrets = config.get("_secrets", {})
+    feishu_cfg = secrets.get("feishu", {})
+    app_id = str(feishu_cfg.get("app_id", "")).strip()
+    app_secret = str(feishu_cfg.get("app_secret", "")).strip()
+    user_open_id = str(review_cfg.get("feishu_user_id", "")).strip()
+    if not app_id or not app_secret or not user_open_id:
+        return
+
+    text = f"✅ 已补充 {added_count} 条文章，草稿箱已更新。\n\n📄 {title}"
+    token = _get_feishu_token(app_id, app_secret)
+    if token:
+        _send_feishu_text(user_open_id, text, token)
+
+
+def _parse_supplement_numbers(user_input: str) -> list[int]:
+    """从「补充 1、3、5」类似文本解析出编号列表。"""
+    import re
+    user_input = user_input.strip()
+    # 支持「补充1,3,5」「补充 1、3、5」「补充1 3 5」「补充1.3.5」等
+    patterns = [
+        r"补充\D*(\d+(?:\D+\d+)*)",
+        r"补充\s*(\d+(?:\s+\d+)*)",
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, user_input)
+        if not m:
+            continue
+        part = m.group(1)
+        # 替换分隔符为空格，再用空格 split
+        for sep in ["、", ",", "，", ".", "，"]:
+            part = part.replace(sep, " ")
+        nums = [int(x) for x in part.split() if x.isdigit()]
+        return nums
+    return []

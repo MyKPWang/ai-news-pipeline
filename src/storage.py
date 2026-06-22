@@ -476,3 +476,122 @@ class Storage:
             item.ensure_id()
             result[stage].append(item)
         return result
+    def get_published_items_for_run(
+        self,
+        run_id: int,
+    ) -> list[NewsItem]:
+        """获取指定 run 的所有 publishable 文章（含 rewrite 后的数据）。"""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select
+                    ri.item_id,
+                    ri.title,
+                    ri.source,
+                    ri.url,
+                    ri.desc,
+                    ri.publish_time,
+                    ri.time_text,
+                    ri.extra_json,
+                    pi.category,
+                    pi.selection_reason,
+                    pi.core_fact,
+                    pi.rewritten_title,
+                    pi.summary,
+                    pi.risk_flags_json
+                from processed_items pi
+                join raw_items ri on ri.id = pi.raw_item_id
+                where pi.run_id = ?
+                  and pi.stage in ('publishable', 'rewritten')
+                order by pi.updated_at asc
+                """,
+                (run_id,),
+            ).fetchall()
+
+        items: list[NewsItem] = []
+        for row in rows:
+            extra = json.loads(row[7]) or {} if row[7] else {}
+            try:
+                risk_flags = json.loads(row[13] or "[]")
+            except json.JSONDecodeError:
+                risk_flags = []
+            item = NewsItem(
+                id=str(row[0]),
+                title=row[1] or "",
+                source=row[2] or "",
+                url=row[3] or "",
+                desc=row[4] or "",
+                publish_time=row[5],
+                time_text=row[6] or "",
+                extra=extra,
+            )
+            item.ensure_id()
+            item.category = row[8] or ""
+            item.selection_reason = row[9] or ""
+            item.core_fact = row[10] or ""
+            item.rewritten_title = row[11] or ""
+            item.summary = row[12] or ""
+            item.risk_flags = risk_flags if isinstance(risk_flags, list) else []
+            items.append(item)
+        return items
+
+
+
+    def get_published_items_for_run(
+        self,
+        run_id: int,
+    ) -> list[NewsItem]:
+        """获取指定 run 的所有 publishable 文章（含 rewrite 后的数据）。"""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select
+                    ri.item_id,
+                    ri.title,
+                    ri.source,
+                    ri.url,
+                    ri.desc,
+                    ri.publish_time,
+                    ri.time_text,
+                    ri.extra_json,
+                    pi.category,
+                    pi.selection_reason,
+                    pi.core_fact,
+                    pi.rewritten_title,
+                    pi.summary,
+                    pi.risk_flags_json
+                from processed_items pi
+                join raw_items ri on ri.id = pi.raw_item_id
+                where pi.run_id = ?
+                  and pi.stage in ('publishable', 'rewritten')
+                order by pi.updated_at asc
+                """,
+                (run_id,),
+            ).fetchall()
+
+        items: list[NewsItem] = []
+        for row in rows:
+            extra = json.loads(row[7]) or {} if row[7] else {}
+            try:
+                risk_flags = json.loads(row[13] or "[]")
+            except json.JSONDecodeError:
+                risk_flags = []
+            item = NewsItem(
+                id=str(row[0]),
+                title=row[1] or "",
+                source=row[2] or "",
+                url=row[3] or "",
+                desc=row[4] or "",
+                publish_time=row[5],
+                time_text=row[6] or "",
+                extra=extra,
+            )
+            item.ensure_id()
+            item.category = row[8] or ""
+            item.selection_reason = row[9] or ""
+            item.core_fact = row[10] or ""
+            item.rewritten_title = row[11] or ""
+            item.summary = row[12] or ""
+            item.risk_flags = risk_flags if isinstance(risk_flags, list) else []
+            items.append(item)
+        return items
