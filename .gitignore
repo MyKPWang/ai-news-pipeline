@@ -19,3 +19,6 @@ models/
 *.sqlite3
 
 .DS_Store
+
+.latest_github_data.json
+.latest_review_run.json

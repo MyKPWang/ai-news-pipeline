@@ -9,6 +9,7 @@ from typing import Any
 @dataclass
 class NewsItem:
     id: str = ""
+    raw_id: int | None = None  # database primary key of raw_items table
     title: str = ""
     desc: str = ""
     content: str = ""

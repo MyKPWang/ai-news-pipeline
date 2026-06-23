@@ -447,6 +447,7 @@ class Storage:
             rows = conn.execute(
                 """
                 select
+                    ri.id,
                     ri.item_id,
                     ri.title,
                     ri.source,
@@ -469,15 +470,16 @@ class Storage:
 
         items: list[NewsItem] = []
         for row in rows:
-            extra = json.loads(row[7]) if row[7] else {}
+            extra = json.loads(row[8]) if row[8] else {}
             item = NewsItem(
-                id=str(row[0]),
-                title=row[1] or "",
-                source=row[2] or "",
-                url=row[3] or "",
-                desc=row[4] or "",
-                publish_time=row[5],
-                time_text=row[6] or "",
+                id=str(row[1]),
+                raw_id=row[0],
+                title=row[2] or "",
+                source=row[3] or "",
+                url=row[4] or "",
+                desc=row[5] or "",
+                publish_time=row[6],
+                time_text=row[7] or "",
                 extra=extra,
             )
             item.ensure_id()

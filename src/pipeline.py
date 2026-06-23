@@ -460,7 +460,8 @@ def _send_review_list_to_feishu(
             time_text = item.time_text or ""
             if len(title) > 45:
                 title = title[:45] + "..."
-            line = f"{i}. {title}"
+            raw_id_tag = f" #{item.raw_id}" if getattr(item, 'raw_id', None) else ""
+            line = f"{i}. {title}{raw_id_tag}"
             if source:
                 line += f" - {source}"
             if time_text:
