@@ -39,6 +39,7 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         raw_items = collect_all_sources(config, storage, run_id)
         raw_id_map = storage.insert_raw_items(run_id, raw_items)
         _log(storage, run_id, "info", "pipeline", "collected", f"raw_items={len(raw_items)}")
+        _log(storage, run_id, "info", "pipeline", "inserted", f"raw_items={len(raw_id_map)} diff_collected_vs_inserted={len(raw_items) - len(raw_id_map)}")
 
         candidates, review_time = filter_recent(raw_items, config)
         review_items.extend(review_time)
@@ -59,9 +60,10 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         kw_result = keyword_filter(candidates)
         for item, reason in kw_result.removed:
             storage.add_filter_event(run_id, "keyword_filter", "removed", item, raw_id_map.get(item.id), "keyword", reason)
-            storage.upsert_processed(run_id, item, "filtered", raw_id_map.get(item.id))
+            storage.upsert_processed(run_id, item, "review", raw_id_map.get(item.id))
         for item, reason in kw_result.protected:
             storage.add_filter_event(run_id, "keyword_filter", "warning", item, raw_id_map.get(item.id), "positive_protected", reason)
+            storage.upsert_processed(run_id, item, "review", raw_id_map.get(item.id))
         candidates = sort_by_source_priority(kw_result.kept)
 
         dedup_result = exact_dedup(candidates)
