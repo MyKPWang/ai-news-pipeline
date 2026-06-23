@@ -16,11 +16,7 @@ from .llm.minimax import LlmError, MiniMaxClient
 from .logging_utils import setup_logging
 from .models import NewsItem, PipelineResult
 from .publisher import publish_to_wechat_tool, render_wechat_html
-from .sources.github import GithubSource
 from .sources.portals import PortalSource
-from .sources.wechat import WechatApiSource
-from .storage import Storage
-from .time_utils import format_time_text, parse_publish_time
 from .sources.wechat import WechatApiSource
 from .storage import Storage
 from .time_utils import format_time_text, parse_publish_time
@@ -40,7 +36,7 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
     published = False
 
     try:
-        raw_items, github_items = collect_all_sources(config, storage, run_id)
+        raw_items = collect_all_sources(config, storage, run_id)
         raw_id_map = storage.insert_raw_items(run_id, raw_items)
         _log(storage, run_id, "info", "pipeline", "collected", f"raw_items={len(raw_items)}")
 
@@ -166,35 +162,6 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
             storage.upsert_processed(run_id, item, "publishable", raw_id_map.get(item.id))
 
         data = build_publish_data(publishable_items, global_info)
-        # 生成 GitHub 趋势榜图片
-        github_trending_image_url = None
-        github_trending_data = None
-        if github_items:
-            from .generate_github_table import generate_github_trending_table, upload_image_to_wechat
-            output_dir = Path(__file__).parent.parent / "wechat-publish-tool" / "output"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            img_path = generate_github_trending_table(github_items, output_dir)
-            if img_path:
-                # 上传到微信素材库获取永久 URL
-                publish_config = config.get("wechat_publish", {})
-                github_trending_image_url = upload_image_to_wechat(img_path, publish_config)
-                if not github_trending_image_url:
-                    # 上传失败时用本地路径
-                    github_trending_image_url = img_path
-                github_trending_data = {
-                    "image_url": github_trending_image_url,
-                    "repos": [
-                        {
-                            "title": item.title,
-                            "desc": item.desc,
-                            "link": item.url,
-                            "stars": item.extra.get("stars", "–"),
-                            "language": item.extra.get("language", ""),
-                        }
-                        for item in github_items[:10]
-                    ],
-                }
-                data["github_trending"] = github_trending_data
         title = build_article_title()
         sources = collect_sources(publishable_items)
         html_path = render_wechat_html(data, title, sources, config)
@@ -206,10 +173,7 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         export_outputs(config, storage, run_date, raw_items, publishable_items, review_items)
         status = "success" if published or no_publish else "partial"
         storage.finish_run(run_id, status, len(raw_items), len(selected_items), len(publishable_items))
-        # 保存 github_trending_data 供 supplement 使用
-        if github_trending_data:
-            _save_review_run(run_id, run_date)
-            _save_github_data(github_trending_data)
+        _save_review_run(run_id, run_date)
         return PipelineResult(
             run_id=run_id,
             raw_items=raw_items,
@@ -231,21 +195,17 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         raise
 
 
-def collect_all_sources(config: dict, storage: Storage, run_id: int) -> tuple[list[NewsItem], list[NewsItem]]:
+def collect_all_sources(config: dict, storage: Storage, run_id: int) -> list[NewsItem]:
     items: list[NewsItem] = []
-    github_items: list[NewsItem] = []
-    for source in (WechatApiSource(config), PortalSource(config), GithubSource(config)):
+    for source in (WechatApiSource(config), PortalSource(config)):
         try:
             collected = source.collect()
-            if source.name == "github":
-                github_items = collected
-            else:
-                items.extend(collected)
+            items.extend(collected)
             _log(storage, run_id, "info", "source", source.name, f"count={len(collected)}")
         except Exception as exc:
             _log(storage, run_id, "error", "source", source.name, str(exc))
             logger.warning("Source failed: %s %s", source.name, exc)
-    return items, github_items
+    return items
 
 
 def sort_by_source_priority(items: list[NewsItem]) -> list[NewsItem]:
@@ -454,29 +414,6 @@ def _load_latest_review_run() -> tuple[int, str] | None:
         return None
 
 
-def _github_data_path() -> Path:
-    return Path(__file__).parent.parent / ".latest_github_data.json"
-
-
-def _save_github_data(github_trending_data: dict | None) -> None:
-    if github_trending_data is None:
-        return
-    path = _github_data_path()
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(github_trending_data, f, ensure_ascii=False)
-
-
-def _load_github_data() -> dict | None:
-    path = _github_data_path()
-    if not path.exists():
-        return None
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
 def _send_review_list_to_feishu(
     config: dict,
     storage: Storage,
@@ -652,12 +589,6 @@ def handle_supplement(
     title = build_article_title()
     sources = collect_sources(combined_items)
     data = build_publish_data(combined_items, global_info)
-
-    # GitHub 趋势榜（直接复用旧草稿的数据，不重新生成）
-    github_trending_data = _load_github_data()
-    if github_trending_data:
-        data["github_trending"] = github_trending_data
-        logger.info("Supplement: reused existing github_trending_data")
 
     html_path = render_wechat_html(data, title, sources, config)
 
