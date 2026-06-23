@@ -437,22 +437,11 @@ def _send_review_list_to_feishu(
         logger.warning("Feishu review list: missing app_id/app_secret/user_id in config")
         return
 
-    stages: list[str] = []
-    if review_cfg.get("include_time_filter", False):
-        stages.append("time_filter")
-    if review_cfg.get("include_quality_filter", True):
-        stages.append("quality_filter")
-    if review_cfg.get("include_keyword_filter", True):
-        stages.append("keyword_filter")
-    stages.append("rewrite_check")
-    if not stages:
-        return
-
     # 保存 run_id，用户回复「补充 X」时我知道查哪批
     _save_review_run(run_id, run_date)
 
-    # 扁平列表，统一编号
-    items = storage.get_review_items_flat(run_id, stages)
+    # 使用与 handle_supplement 一致的查询（直接从 processed_items 查 stage='review'）
+    items = storage.get_review_items_from_processed(run_id)
 
     lines_out: list[str] = []
     lines_out.append(f"📋 **{run_date} 备选文章列表**")
@@ -529,17 +518,8 @@ def handle_supplement(
     if not existing:
         return False, f"run_id={run_id} 没有已发布的文章，请先触发采集生成初稿"
 
-    # 4. 获取 review 列表
-    review_cfg = config.get("review_list", {})
-    stages: list[str] = []
-    if review_cfg.get("include_time_filter", False):
-        stages.append("time_filter")
-    if review_cfg.get("include_quality_filter", True):
-        stages.append("quality_filter")
-    if review_cfg.get("include_keyword_filter", True):
-        stages.append("keyword_filter")
-    stages.append("rewrite_check")
-    review_items = storage.get_review_items_flat(run_id, stages)
+    # 4. 获取 review 列表（从 processed_items 表直接查 stage='review'）
+    review_items = storage.get_review_items_from_processed(run_id)
 
     # 5. 按编号选出文章（编号从 1 开始）
     selected_for_rewrite: list[NewsItem] = []

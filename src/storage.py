@@ -441,6 +441,49 @@ class Storage:
             items.append(item)
         return items
 
+    def get_review_items_from_processed(self, run_id: int) -> list[NewsItem]:
+        """直接从 processed_items 表查询 stage='review' 的文章（供 supplement 使用）。"""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select
+                    ri.item_id,
+                    ri.title,
+                    ri.source,
+                    ri.url,
+                    ri.desc,
+                    ri.publish_time,
+                    ri.time_text,
+                    ri.extra_json,
+                    pi.selection_reason,
+                    pi.core_fact,
+                    pi.rewritten_title,
+                    pi.summary
+                from processed_items pi
+                join raw_items ri on ri.id = pi.raw_item_id
+                where pi.run_id = ? and pi.stage = 'review'
+                order by ri.publish_time desc
+                """,
+                (run_id,),
+            ).fetchall()
+
+        items: list[NewsItem] = []
+        for row in rows:
+            extra = json.loads(row[7]) if row[7] else {}
+            item = NewsItem(
+                id=str(row[0]),
+                title=row[1] or "",
+                source=row[2] or "",
+                url=row[3] or "",
+                desc=row[4] or "",
+                publish_time=row[5],
+                time_text=row[6] or "",
+                extra=extra,
+            )
+            item.ensure_id()
+            items.append(item)
+        return items
+
     def get_review_items_by_filter(
         self,
         run_id: int,
