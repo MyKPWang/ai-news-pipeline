@@ -398,22 +398,62 @@ def _review_run_info_path() -> Path:
 
 
 def _save_review_run(run_id: int, run_date: str) -> None:
+    """保存（追加）到 recent runs 列表。"""
     path = _review_run_info_path()
     path.parent.mkdir(parents=True, exist_ok=True)
+    existing_runs = []
+    if path.exists():
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                existing_runs = json.load(f).get("runs", [])
+        except Exception:
+            existing_runs = []
+    # Prepend, dedupe by run_id, keep last 5
+    new_entry = {"run_id": run_id, "run_date": run_date}
+    existing_runs = [new_entry] + [r for r in existing_runs if r.get("run_id") != run_id]
+    existing_runs = existing_runs[:5]
     with path.open("w", encoding="utf-8") as f:
-        json.dump({"run_id": run_id, "run_date": run_date}, f)
+        json.dump({"runs": existing_runs}, f, ensure_ascii=False)
 
 
 def _load_latest_review_run() -> tuple[int, str] | None:
+    """返回最近一次 pipeline run 的 (run_id, run_date)。"""
     path = _review_run_info_path()
     if not path.exists():
         return None
     try:
         with path.open("r", encoding="utf-8") as f:
             data = json.load(f)
-        return int(data.get("run_id", 0)), str(data.get("run_date", ""))
+        runs = data.get("runs", [])
+        if not runs:
+            return None
+        return int(runs[0]["run_id"]), str(runs[0]["run_date"])
     except Exception:
         return None
+
+
+def _load_review_items_for_run(run_id: int) -> list[dict]:
+    """加载指定 run_id 的通知列表（通知时保存的那份 items 列表）。"""
+    path = _review_run_items_path(run_id)
+    if not path.exists():
+        return []
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
+def _review_run_items_path(run_id: int) -> Path:
+    return Path(__file__).parent.parent / f".review_items_{run_id}.json"
+
+
+def _save_review_items(run_id: int, items: list[dict]) -> None:
+    """保存通知时的 review items 列表到独立文件，供 supplement 使用。"""
+    path = _review_run_items_path(run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump(items, f, ensure_ascii=False)
 
 
 def _send_review_list_to_feishu(
@@ -442,6 +482,20 @@ def _send_review_list_to_feishu(
 
     # 使用与 handle_supplement 一致的查询（直接从 processed_items 查 stage='review'）
     items = storage.get_review_items_from_processed(run_id)
+
+    # 保存通知时的 items 列表（带 raw_id），供 supplement 使用
+    # 这样 supplement 用的是通知时的同一份列表，不会受后续 run 影响
+    items_serialized = [
+        {
+            "num": i,
+            "title": item.title or "",
+            "source": item.source or "",
+            "url": item.url or "",
+            "raw_id": getattr(item, "raw_id", None),
+        }
+        for i, item in enumerate(items, 1)
+    ]
+    _save_review_items(run_id, items_serialized)
 
     lines_out: list[str] = []
     lines_out.append(f"📋 **{run_date} 备选文章列表**")
@@ -519,21 +573,40 @@ def handle_supplement(
     if not existing:
         return False, f"run_id={run_id} 没有已发布的文章，请先触发采集生成初稿"
 
-    # 4. 获取 review 列表（从 processed_items 表直接查 stage='review'）
-    review_items = storage.get_review_items_from_processed(run_id)
+    # 4. 获取 review 列表（从通知时保存的 JSON 文件，编号与通知完全对应）
+    saved_items = _load_review_items_for_run(run_id)
+    if not saved_items:
+        # 兼容：没有保存文件时回退到数据库查询
+        saved_items_raw = storage.get_review_items_from_processed(run_id)
+        saved_items = [
+            {"num": i, "title": item.title or "", "source": item.source or "",
+             "url": item.url or "", "raw_id": getattr(item, "raw_id", None)}
+            for i, item in enumerate(saved_items_raw, 1)
+        ]
 
     # 5. 按编号选出文章（编号从 1 开始）
-    selected_for_rewrite: list[NewsItem] = []
+    # saved_items 是通知时的列表，格式为 {num, title, source, url, raw_id}
+    selected_raw_ids: list[int] = []
     invalid_nums: list[int] = []
     for num in numbers:
-        idx = num - 1
-        if idx < 0 or idx >= len(review_items):
+        if num < 1 or num > len(saved_items):
             invalid_nums.append(num)
         else:
-            selected_for_rewrite.append(review_items[idx])
+            raw_id = saved_items[num - 1].get("raw_id")
+            if raw_id:
+                selected_raw_ids.append(raw_id)
 
     if invalid_nums:
-        return False, f"编号 {invalid_nums} 超出范围，有效范围 1～{len(review_items)}"
+        return False, f"编号 {invalid_nums} 超出范围，有效范围 1～{len(saved_items)}"
+    if not selected_raw_ids:
+        return False, "未选中任何文章"
+
+    # 6. 用 raw_id 从数据库查出完整的 NewsItem 对象供 LLM 重写
+    selected_for_rewrite: list[NewsItem] = []
+    for raw_id in selected_raw_ids:
+        item = storage.get_raw_item_by_id(raw_id)
+        if item:
+            selected_for_rewrite.append(item)
     if not selected_for_rewrite:
         return False, "未选中任何文章"
 

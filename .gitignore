@@ -22,3 +22,5 @@ models/
 
 .latest_github_data.json
 .latest_review_run.json
+
+.review_items_*.json
