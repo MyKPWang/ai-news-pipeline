@@ -89,6 +89,15 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
             _log(storage, run_id, "error", "llm", "global_select_failed", str(exc))
             raise
 
+        # 对 selected_items 按 item_id 去重，防止 LLM global_select 返回重复 index
+        seen_ids: set[str] = set()
+        unique_selected: list[NewsItem] = []
+        for item in selected_items:
+            if item.id not in seen_ids:
+                seen_ids.add(item.id)
+                unique_selected.append(item)
+        selected_items = unique_selected
+
         for item in selected_items:
             storage.upsert_processed(run_id, item, "selected", raw_id_map.get(item.id))
 
