@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
+
+logger = logging.getLogger(__name__)
 
 from .models import NewsItem
 
@@ -175,32 +178,38 @@ class Storage:
         with self.connect() as conn:
             for item in items:
                 item.ensure_id()
-                conn.execute(
-                    """
-                    insert or ignore into raw_items(
-                        item_id, run_id, source, source_type, title, desc, content,
-                        html_content, url, publish_time, time_text, cover_url,
-                        extra_json, created_at
+                try:
+                    conn.execute(
+                        """
+                        insert into raw_items(
+                            item_id, run_id, source, source_type, title, desc, content,
+                            html_content, url, publish_time, time_text, cover_url,
+                            extra_json, created_at
+                        )
+                        values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            item.id,
+                            run_id,
+                            item.source,
+                            item.source_type,
+                            item.title,
+                            item.desc,
+                            item.content,
+                            item.html_content,
+                            item.url,
+                            item.publish_time,
+                            item.time_text,
+                            item.cover_url,
+                            json.dumps(item.extra or {}, ensure_ascii=False),
+                            utc_now_iso(),
+                        ),
                     )
-                    values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        item.id,
-                        run_id,
-                        item.source,
-                        item.source_type,
-                        item.title,
-                        item.desc,
-                        item.content,
-                        item.html_content,
-                        item.url,
-                        item.publish_time,
-                        item.time_text,
-                        item.cover_url,
-                        json.dumps(item.extra or {}, ensure_ascii=False),
-                        utc_now_iso(),
-                    ),
-                )
+                except Exception:
+                    logger.warning(
+                        "insert_raw_items: item_id=%s run_id=%d title=%s skipped (constraint): %s",
+                        item.id, run_id, (item.title or "")[:30], item.url[:50] if item.url else "",
+                    )
             rows = conn.execute(
                 "select id, item_id from raw_items where run_id = ?", (run_id,)
             ).fetchall()
