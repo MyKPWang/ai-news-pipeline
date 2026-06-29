@@ -38,15 +38,22 @@ class WechatApiSource(Source):
         threshold = now - timedelta(hours=lookback_hours)
         threshold_ts = int(threshold.timestamp())
 
-        # 只查一次所有文章（按 publish_time 排序）
-        # 注意：per-mp_id 查询返回的顺序是按采集时间而非发布时间，
-        # 会导致最近采集的老文章被优先返回，造成 time_filter 失效。
-        # 因此只使用全局查询（按 publish_time 降序）。
+        # 先查一次所有文章（不过滤公众号），获取最新内容
         all_items: list[NewsItem] = []
         try:
             all_items.extend(self._get_articles(base_url, token, None, 100, timeout, fetch_detail, threshold_ts))
         except Exception as exc:
             logger.warning("Wechat all-articles query failed: %s", exc)
+
+        # 再按公众号分别查兜底
+        if mp_ids:
+            for mp_id in mp_ids:
+                try:
+                    all_items.extend(
+                        self._get_articles(base_url, token, mp_id, 50, timeout, fetch_detail, threshold_ts)
+                    )
+                except Exception as exc:
+                    logger.warning("Wechat article query failed for %s: %s", mp_id, exc)
 
         # 按 publish_time 降序排序（最新的在前）
         all_items.sort(key=lambda x: x.publish_time or 0, reverse=True)
