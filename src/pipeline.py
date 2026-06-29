@@ -502,7 +502,7 @@ def handle_supplement(
         logger.info(f"handle_supplement: run_id={run_id} has 0 published, using supplement items only")
 
     # 4. 获取 review 列表（从数据库 processed_items stage='review'）
-    saved_items_raw = storage.get_review_items_from_processed(run_id, order_by_pi_id=True)
+    saved_items_raw = storage.get_review_items_from_processed(run_id, order_by_source=True)
     saved_items = [
         {"num": i, "title": item.title or "", "source": item.source or "",
          "url": item.url or "", "raw_id": getattr(item, "raw_id", None)}

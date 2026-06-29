@@ -398,16 +398,16 @@ class Storage:
         return str(output)
 
     def get_review_items_from_processed(
-        self, run_id: int, order_by_pi_id: bool = False
+        self, run_id: int, order_by_source: bool = False
     ) -> list[NewsItem]:
         """直接从 processed_items 表查询 stage='review' 的文章（供 supplement 使用）。
 
         Args:
             run_id: 要查询的 run ID
-            order_by_pi_id: True 时按 pi.id ASC 排序（与通知列表顺序一致），
-                           False 时按 publish_time DESC 排序（原始顺序）
+            order_by_source: True 时按 ri.source, ri.id 排序（与通知列表顺序一致），
+                            False 时按 ri.publish_time DESC 排序
         """
-        order_clause = "pi.id asc" if order_by_pi_id else "ri.publish_time desc"
+        order_clause = "ri.source, ri.id" if order_by_source else "ri.publish_time desc"
         with self.connect() as conn:
             rows = conn.execute(
                 f"""
