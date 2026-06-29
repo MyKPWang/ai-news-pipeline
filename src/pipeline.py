@@ -175,6 +175,9 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         sources = collect_sources(publishable_items)
         html_path = render_wechat_html(data, title, sources, config)
 
+        # 保存 global_info（包含 insight）供 supplement 使用
+        _save_global_info_for_run(run_id, run_date, global_info)
+
         should_publish = should_upload(config, no_publish, selected_items, publishable_items, review_items)
         if should_publish:
             published = publish_to_wechat_tool(data, title, sources, config)
@@ -371,6 +374,26 @@ def _log(storage: Storage, run_id: int, level: str, module: str, event: str, mes
         "%s %s", event, message
     )
     storage.add_app_log(run_id, level, module, event, message)
+
+
+def _save_global_info_for_run(run_id: int, run_date: str, global_info: dict) -> None:
+    """将 global_info（包含 insight）保存到 JSON 文件。"""
+    path = Path(__file__).parent.parent / "output" / f"global_info_{run_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as f:
+        json.dump({"run_id": run_id, "run_date": run_date, **global_info}, f, ensure_ascii=False)
+
+
+def _load_global_info_for_run(run_id: int) -> dict | None:
+    """从 JSON 文件加载 global_info（包含 insight）。"""
+    path = Path(__file__).parent.parent / "output" / f"global_info_{run_id}.json"
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------
@@ -603,7 +626,8 @@ def handle_supplement(
                  len(existing), len(rewritten), len(combined_items))
 
     # 8. 跳过洞察生成，直接使用空 insight（supplement 不需要重新生成洞察）
-    global_info = {"insight": "", "selected": []}
+    saved_global = _load_global_info_for_run(run_id)
+    global_info = saved_global if saved_global else {"insight": "", "selected": []}
 
     # 9. 重新构建 HTML
     title = build_article_title()
