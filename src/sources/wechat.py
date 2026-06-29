@@ -47,7 +47,7 @@ class WechatApiSource(Source):
         for mp_id in mp_ids:
             try:
                 all_items.extend(
-                    self._get_articles(base_url, token, mp_id, 100, timeout, fetch_detail, threshold_ts)
+                    self._get_articles(base_url, token, mp_id, 15, timeout, fetch_detail, threshold_ts)
                 )
             except Exception as exc:
                 logger.warning("Wechat article query failed for %s: %s", mp_id, exc)
