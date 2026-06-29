@@ -42,14 +42,13 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         _log(storage, run_id, "info", "pipeline", "inserted", f"raw_items={len(raw_id_map)} diff_collected_vs_inserted={len(raw_items) - len(raw_id_map)}")
 
         candidates, review_time = filter_recent(raw_items, config)
-        review_items.extend(review_time)
+        # time_filter 拦的不进 review list，只写日志
         for item in review_time:
-            storage.upsert_processed(run_id, item, "review", raw_id_map.get(item.id))
             storage.add_filter_event(
-                run_id, "time_filter", "review", item, raw_id_map.get(item.id),
+                run_id, "time_filter", "time_filtered", item, raw_id_map.get(item.id),
                 "time_unparsed_or_out_of_range", "无法解析时间或不在24小时窗口内"
             )
-        _log(storage, run_id, "info", "pipeline", "time_filter", f"kept={len(candidates)} review={len(review_time)}")
+        _log(storage, run_id, "info", "pipeline", "time_filter", f"kept={len(candidates)} time_filtered={len(review_time)}")
 
         candidates, review_quality = quality_filter(candidates)
         review_items.extend([item for item, _reason in review_quality])
@@ -448,100 +447,6 @@ def _review_run_items_path(run_id: int) -> Path:
     return Path(__file__).parent.parent / f".review_items_{run_id}.json"
 
 
-def _save_review_items(run_id: int, items: list[dict]) -> None:
-    """保存通知时的 review items 列表到独立文件，供 supplement 使用。"""
-    path = _review_run_items_path(run_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False)
-
-
-def _send_review_list_to_feishu(
-    config: dict,
-    storage: Storage,
-    run_id: int,
-    published_count: int,
-    run_date: str,
-) -> None:
-    """从 storage 查询 review 列表，统一编号后发送飞书。"""
-    review_cfg = config.get("review_list", {})
-    if not review_cfg.get("feishu_enabled", False):
-        return
-
-    secrets = config.get("_secrets", {})
-    feishu_cfg = secrets.get("feishu", {})
-    app_id = str(feishu_cfg.get("app_id", "")).strip()
-    app_secret = str(feishu_cfg.get("app_secret", "")).strip()
-    user_open_id = str(review_cfg.get("feishu_user_id", "")).strip()
-    if not app_id or not app_secret or not user_open_id:
-        logger.warning("Feishu review list: missing app_id/app_secret/user_id in config")
-        return
-
-    # 保存 run_id，用户回复「补充 X」时我知道查哪批
-    _save_review_run(run_id, run_date)
-
-    # 使用与 handle_supplement 一致的查询（直接从 processed_items 查 stage='review'）
-    items = storage.get_review_items_from_processed(run_id)
-
-    # 保存通知时的 items 列表（带 raw_id），供 supplement 使用
-    # 这样 supplement 用的是通知时的同一份列表，不会受后续 run 影响
-    items_serialized = [
-        {
-            "num": i,
-            "title": item.title or "",
-            "source": item.source or "",
-            "url": item.url or "",
-            "raw_id": getattr(item, "raw_id", None),
-        }
-        for i, item in enumerate(items, 1)
-    ]
-    _save_review_items(run_id, items_serialized)
-
-    lines_out: list[str] = []
-    lines_out.append(f"📋 **{run_date} 备选文章列表**")
-    lines_out.append("")
-    lines_out.append(f"已自动发布：{published_count} 条 | 以下为未被选用的备选文章（共 {len(items)} 条）：")
-    lines_out.append("")
-
-    if not items:
-        lines_out.append("（无备选文章）")
-        lines_out.append("")
-    else:
-        for i, item in enumerate(items, 1):
-            title = item.title or "(无标题)"
-            url = item.url or ""
-            source = item.source or ""
-            time_text = item.time_text or ""
-            if len(title) > 45:
-                title = title[:45] + "..."
-            raw_id_tag = f" #{item.raw_id}" if getattr(item, 'raw_id', None) else ""
-            line = f"{i}. {title}{raw_id_tag}"
-            if source:
-                line += f" - {source}"
-            if time_text:
-                line += f" ({time_text})"
-            lines_out.append(line)
-            if url:
-                lines_out.append(f"   🔗 {url}")
-
-    lines_out.append("")
-    lines_out.append("---")
-    lines_out.append("回复格式：如需补充，请直接回复「补充 + 编号」")
-    lines_out.append("示例：补充 1、3、5")
-
-    text = "\n".join(lines_out)
-
-    token = _get_feishu_token(app_id, app_secret)
-    if not token:
-        logger.warning("Feishu review list: could not get access token")
-        return
-
-    sent = _send_feishu_text(user_open_id, text, token)
-    if sent:
-        logger.info("Feishu review list sent: %d items", len(items))
-    else:
-        logger.warning("Failed to send Feishu review list")
-
 
 
 # ---------------------------------------------------------------
@@ -571,13 +476,17 @@ def handle_supplement(
     # 3. 确认 run_id 对应的草稿箱已有内容（避免乱补充）
     existing = storage.get_published_items_for_run(run_id)
     if not existing:
-        return False, f"run_id={run_id} 没有已发布的文章，请先触发采集生成初稿"
+        # 当前 run 精选了 0 条，跳过 base，直接用用户选的文章作为全部内容
+        # 这样 hot_items 全部来自 LLM 重写后的文章，不会有空标题问题
+        existing = []
+        logger.info(f"handle_supplement: run_id={run_id} has 0 published, using supplement items only")
 
     # 4. 获取 review 列表（从通知时保存的 JSON 文件，编号与通知完全对应）
     saved_items = _load_review_items_for_run(run_id)
     if not saved_items:
         # 兼容：没有保存文件时回退到数据库查询
-        saved_items_raw = storage.get_review_items_from_processed(run_id)
+        # 注意：必须使用 pi.id ASC 排序，与通知列表顺序一致
+        saved_items_raw = storage.get_review_items_from_processed(run_id, order_by_pi_id=True)
         saved_items = [
             {"num": i, "title": item.title or "", "source": item.source or "",
              "url": item.url or "", "raw_id": getattr(item, "raw_id", None)}
@@ -633,13 +542,8 @@ def handle_supplement(
     logger.info("Supplements: existing=%d + rewritten=%d = combined=%d",
                  len(existing), len(rewritten), len(combined_items))
 
-    # 8. 重新生成今日洞察（用所有文章）
-    try:
-        _, global_info = llm_client.select_items(combined_items)
-        logger.info("Supplement: new insight=%s", str(global_info.get("insight", ""))[:80])
-    except Exception as exc:
-        logger.warning("Supplement: failed to generate insight: %s", exc)
-        global_info = {"hot_topics": [], "insight": "", "selected": []}
+    # 8. 跳过洞察生成，直接使用空 insight（supplement 不需要重新生成洞察）
+    global_info = {"insight": "", "selected": []}
 
     # 9. 重新构建 HTML
     title = build_article_title()
