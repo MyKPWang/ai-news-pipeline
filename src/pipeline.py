@@ -51,20 +51,24 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         _log(storage, run_id, "info", "pipeline", "time_filter", f"kept={len(candidates)} time_filtered={len(review_time)}")
 
         candidates, review_quality = quality_filter(candidates)
+        for item, _reason in review_quality:
+            item.raw_id = raw_id_map.get(item.id)
         review_items.extend([item for item, _reason in review_quality])
         for item, reason in review_quality:
             storage.upsert_processed(run_id, item, "review", raw_id_map.get(item.id))
             storage.add_filter_event(run_id, "quality_filter", "review", item, raw_id_map.get(item.id), reason, reason)
 
         kw_result = keyword_filter(candidates)
-        review_items.extend([item for item, _reason in kw_result.removed])
         for item, reason in kw_result.removed:
             storage.add_filter_event(run_id, "keyword_filter", "removed", item, raw_id_map.get(item.id), "keyword", reason)
             storage.upsert_processed(run_id, item, "review", raw_id_map.get(item.id))
-        review_items.extend([item for item, _reason in kw_result.protected])
+            item.raw_id = raw_id_map.get(item.id)
+        review_items.extend([item for item, _reason in kw_result.removed])
         for item, reason in kw_result.protected:
             storage.add_filter_event(run_id, "keyword_filter", "warning", item, raw_id_map.get(item.id), "positive_protected", reason)
             storage.upsert_processed(run_id, item, "review", raw_id_map.get(item.id))
+            item.raw_id = raw_id_map.get(item.id)
+        review_items.extend([item for item, _reason in kw_result.protected])
         candidates = sort_by_source_priority(kw_result.kept)
 
         dedup_result = exact_dedup(candidates)
@@ -154,6 +158,8 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
             selected_items,
             copy_threshold=int(config.get("output", {}).get("copy_check_threshold", 20)),
         )
+        for item in rewrite_review:
+            item.raw_id = raw_id_map.get(item.id)
         review_items.extend(rewrite_review)
         for item in rewrite_review:
             storage.upsert_processed(run_id, item, "review", raw_id_map.get(item.id))
@@ -501,16 +507,22 @@ def handle_supplement(
         existing = []
         logger.info(f"handle_supplement: run_id={run_id} has 0 published, using supplement items only")
 
-    # 4. 获取 review 列表（从数据库 processed_items stage='review'）
-    saved_items_raw = storage.get_review_items_from_processed(run_id, order_by_source=True)
-    saved_items = [
-        {"num": i, "title": item.title or "", "source": item.source or "",
-         "url": item.url or "", "raw_id": getattr(item, "raw_id", None)}
-        for i, item in enumerate(saved_items_raw, 1)
-    ]
+    # 4. 从 review JSON 文件读取 review 列表（顺序与通知完全一致）
+    review_json_path = Path(__file__).parent.parent / review_file
+    if not review_json_path.exists():
+        return False, f"review 文件不存在: {review_file}，请重新触发采集"
+    try:
+        with review_json_path.open("r", encoding="utf-8") as f:
+            review_data = json.load(f)
+    except Exception as exc:
+        return False, f"review 文件读取失败: {exc}"
+
+    saved_items = review_data.get("items", [])
+    if not saved_items:
+        return False, f"run_id={run_id} 的 review list 为空，请重新触发采集"
 
     # 5. 按编号选出文章（编号从 1 开始）
-    # saved_items 是通知时的列表，格式为 {num, title, source, url, raw_id}
+    # JSON 里的 items 顺序与通知完全一致
     selected_raw_ids: list[int] = []
     invalid_nums: list[int] = []
     for num in numbers:
@@ -518,13 +530,36 @@ def handle_supplement(
             invalid_nums.append(num)
         else:
             raw_id = saved_items[num - 1].get("raw_id")
-            if raw_id:
-                selected_raw_ids.append(raw_id)
+            if raw_id is None:
+                return False, f"编号 {num} 的文章 raw_id 缺失（JSON 未正确生成），请重新触发采集"
+            selected_raw_ids.append(int(raw_id))
 
     if invalid_nums:
         return False, f"编号 {invalid_nums} 超出范围，有效范围 1～{len(saved_items)}"
     if not selected_raw_ids:
         return False, "未选中任何文章"
+
+    # 5b. 标题校验：用 raw_id 查出真实标题，与 JSON 里的标题对比，不一致则报错
+    for num_i, raw_id in enumerate(selected_raw_ids, 1):
+        # 找到这个 raw_id 在 saved_items 里的位置（从1开始）
+        item_pos = next((i for i, item in enumerate(saved_items) if int(item.get("raw_id") or 0) == raw_id), None)
+        if item_pos is None:
+            return False, f"raw_id={raw_id} 在 JSON 中不存在，数据可能已过期"
+        json_item = saved_items[item_pos]
+        json_title = json_item.get("title", "") or ""
+        db_item = storage.get_raw_item_by_id(raw_id)
+        if db_item is None:
+            return False, f"raw_id={raw_id} 在数据库中不存在，数据可能被清理"
+        db_title = db_item.title or ""
+        # 前20字相同即视为同一篇文章（容忍细微差异）
+        if json_title[:20] != db_title[:20]:
+            return False, (
+                f"编号 {item_pos+1} 标题校验失败："
+                f"JSON里是「{json_title[:30]}...」"
+                f"数据库里是「{db_title[:30]}...」，"
+                f"数据不一致，请重新触发采集后再补充"
+            )
+    logger.info(f"handle_supplement: 标题校验通过，{len(selected_raw_ids)} 篇文章确认无误")
 
     # 6. 用 raw_id 从数据库查出完整的 NewsItem 对象供 LLM 重写
     selected_for_rewrite: list[NewsItem] = []
