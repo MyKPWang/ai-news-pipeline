@@ -57,9 +57,11 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
             storage.add_filter_event(run_id, "quality_filter", "review", item, raw_id_map.get(item.id), reason, reason)
 
         kw_result = keyword_filter(candidates)
+        review_items.extend([item for item, _reason in kw_result.removed])
         for item, reason in kw_result.removed:
             storage.add_filter_event(run_id, "keyword_filter", "removed", item, raw_id_map.get(item.id), "keyword", reason)
             storage.upsert_processed(run_id, item, "review", raw_id_map.get(item.id))
+        review_items.extend([item for item, _reason in kw_result.protected])
         for item, reason in kw_result.protected:
             storage.add_filter_event(run_id, "keyword_filter", "warning", item, raw_id_map.get(item.id), "positive_protected", reason)
             storage.upsert_processed(run_id, item, "review", raw_id_map.get(item.id))
@@ -171,10 +173,10 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         if should_publish:
             published = publish_to_wechat_tool(data, title, sources, config)
 
-        export_outputs(config, storage, run_date, raw_items, publishable_items, review_items)
+        review_path = export_outputs(config, storage, run_id, run_date, raw_items, publishable_items, review_items)
         status = "success" if published or no_publish else "partial"
         storage.finish_run(run_id, status, len(raw_items), len(selected_items), len(publishable_items))
-        _save_review_run(run_id, run_date)
+        _save_review_run(run_id, run_date, review_path)
         return PipelineResult(
             run_id=run_id,
             raw_items=raw_items,
@@ -317,17 +319,45 @@ def should_upload(
 def export_outputs(
     config: dict,
     storage: Storage,
+    run_id: int,
     run_date: str,
     raw_items: list[NewsItem],
     publishable_items: list[NewsItem],
     review_items: list[NewsItem],
-) -> None:
+) -> str:
+    """导出所有输出文件，返回 review JSON 的文件路径。"""
     output_cfg = config.get("output", {})
     if output_cfg.get("save_raw_json", True):
         storage.export_items_json(f"output/raw_{run_date}.json", raw_items)
     if output_cfg.get("save_processed_json", True):
         storage.export_items_json(f"output/processed_{run_date}.json", publishable_items)
-    storage.export_items_json(f"output/review_{run_date}.json", review_items)
+    # 生成带时间戳的文件名
+    ts = datetime.now().strftime("%H%M%S")
+    review_filename = f"review_{run_date}_{ts}.json"
+    review_path = f"output/{review_filename}"
+    # review JSON 包含 run_id 和 run_date，方便校验
+    _export_review_with_metadata(review_path, run_id, run_date, review_items)
+    return review_path
+
+
+def _export_review_with_metadata(
+    review_path: str,
+    run_id: int,
+    run_date: str,
+    review_items: list[NewsItem],
+) -> None:
+    """将 review_items 写入 JSON，包含 run_id/run_date 元数据。"""
+    output = Path(review_path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    data = {
+        "run_id": run_id,
+        "run_date": run_date,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "items_count": len(review_items),
+        "items": [item.to_dict() for item in review_items],
+    }
+    with output.open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def _log(storage: Storage, run_id: int, level: str, module: str, event: str, message: str) -> None:
@@ -393,11 +423,11 @@ _FILTER_LABELS: dict[str, str] = {
 
 
 def _review_run_info_path() -> Path:
-    return Path(__file__).parent.parent / ".latest_review_run.json"
+    return Path(__file__).parent.parent / "_review_runs.json"
 
 
-def _save_review_run(run_id: int, run_date: str) -> None:
-    """保存（追加）到 recent runs 列表。"""
+def _save_review_run(run_id: int, run_date: str, review_file: str) -> None:
+    """追加写入 _review_runs.json，记录本次 run 的 review 文件路径。"""
     path = _review_run_info_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     existing_runs = []
@@ -407,16 +437,21 @@ def _save_review_run(run_id: int, run_date: str) -> None:
                 existing_runs = json.load(f).get("runs", [])
         except Exception:
             existing_runs = []
-    # Prepend, dedupe by run_id, keep last 5
-    new_entry = {"run_id": run_id, "run_date": run_date}
+    # Prepend, dedupe by run_id, keep last 20
+    new_entry = {
+        "run_id": run_id,
+        "run_date": run_date,
+        "review_file": review_file,
+        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
     existing_runs = [new_entry] + [r for r in existing_runs if r.get("run_id") != run_id]
-    existing_runs = existing_runs[:5]
+    existing_runs = existing_runs[:20]
     with path.open("w", encoding="utf-8") as f:
         json.dump({"runs": existing_runs}, f, ensure_ascii=False)
 
 
-def _load_latest_review_run() -> tuple[int, str] | None:
-    """返回最近一次 pipeline run 的 (run_id, run_date)。"""
+def _load_latest_review_run() -> tuple[int, str, str] | None:
+    """返回最近一次 pipeline run 的 (run_id, run_date, review_file)。"""
     path = _review_run_info_path()
     if not path.exists():
         return None
@@ -426,25 +461,10 @@ def _load_latest_review_run() -> tuple[int, str] | None:
         runs = data.get("runs", [])
         if not runs:
             return None
-        return int(runs[0]["run_id"]), str(runs[0]["run_date"])
+        return int(runs[0]["run_id"]), str(runs[0]["run_date"]), str(runs[0]["review_file"])
     except Exception:
         return None
 
-
-def _load_review_items_for_run(run_id: int) -> list[dict]:
-    """加载指定 run_id 的通知列表（通知时保存的那份 items 列表）。"""
-    path = _review_run_items_path(run_id)
-    if not path.exists():
-        return []
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
-
-
-def _review_run_items_path(run_id: int) -> Path:
-    return Path(__file__).parent.parent / f".review_items_{run_id}.json"
 
 
 
@@ -471,7 +491,7 @@ def handle_supplement(
     run_info = _load_latest_review_run()
     if not run_info:
         return False, "未找到最近的 review 记录，请先触发一次采集任务"
-    run_id, run_date = run_info
+    run_id, run_date, review_file = run_info
 
     # 3. 确认 run_id 对应的草稿箱已有内容（避免乱补充）
     existing = storage.get_published_items_for_run(run_id)
@@ -481,17 +501,13 @@ def handle_supplement(
         existing = []
         logger.info(f"handle_supplement: run_id={run_id} has 0 published, using supplement items only")
 
-    # 4. 获取 review 列表（从通知时保存的 JSON 文件，编号与通知完全对应）
-    saved_items = _load_review_items_for_run(run_id)
-    if not saved_items:
-        # 兼容：没有保存文件时回退到数据库查询
-        # 注意：必须使用 pi.id ASC 排序，与通知列表顺序一致
-        saved_items_raw = storage.get_review_items_from_processed(run_id, order_by_pi_id=True)
-        saved_items = [
-            {"num": i, "title": item.title or "", "source": item.source or "",
-             "url": item.url or "", "raw_id": getattr(item, "raw_id", None)}
-            for i, item in enumerate(saved_items_raw, 1)
-        ]
+    # 4. 获取 review 列表（从数据库 processed_items stage='review'）
+    saved_items_raw = storage.get_review_items_from_processed(run_id, order_by_pi_id=True)
+    saved_items = [
+        {"num": i, "title": item.title or "", "source": item.source or "",
+         "url": item.url or "", "raw_id": getattr(item, "raw_id", None)}
+        for i, item in enumerate(saved_items_raw, 1)
+    ]
 
     # 5. 按编号选出文章（编号从 1 开始）
     # saved_items 是通知时的列表，格式为 {num, title, source, url, raw_id}
