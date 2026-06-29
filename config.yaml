@@ -37,6 +37,8 @@ wechat_accounts:
     mp_id: "MP_WXS_2392024520"
   - name: "AI前线"
     mp_id: "MP_WXS_3554086560"
+  - name: "智东西"
+    mp_id: "MP_WXS_3081486433"
 
 portal_sites:
   - name: "huxiu"
