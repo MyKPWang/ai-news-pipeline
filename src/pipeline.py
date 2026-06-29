@@ -563,8 +563,17 @@ def handle_supplement(
 
     # 6. 用 raw_id 从数据库查出完整的 NewsItem 对象供 LLM 重写
     selected_for_rewrite: list[NewsItem] = []
-    for raw_id in selected_raw_ids:
-        item = storage.get_raw_item_by_id(raw_id)
+    for i, raw_id in enumerate(selected_raw_ids):
+        if raw_id is not None:
+            item = storage.get_raw_item_by_id(raw_id)
+        else:
+            # JSON 的 raw_id 为 None（旧文件），通过标题+来源查数据库
+            json_item = saved_items[next(i for i, it in enumerate(saved_items) if int(it.get("raw_id") or 0) == (raw_id or 0))]
+            title_hint = json_item.get("title", "")
+            source_hint = json_item.get("source", "")
+            item = storage.get_raw_item_by_title_source(title_hint, source_hint)
+            if item:
+                logger.info(f"handle_supplement: raw_id=None, 通过标题查到 raw_id={item.id}")
         if item:
             selected_for_rewrite.append(item)
     if not selected_for_rewrite:

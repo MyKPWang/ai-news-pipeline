@@ -482,6 +482,40 @@ class Storage:
         item.ensure_id()
         return item
 
+    def get_raw_item_by_title_source(self, title: str, source: str) -> NewsItem | None:
+        """通过标题（前30字）+来源查找 raw_items 表里的单条记录。"""
+        title_hint = title[:30] if title else ""
+        with self.connect() as conn:
+            row = conn.execute(
+                """SELECT id, item_id, title, source, source_type, url, desc,
+                          content, html_content, publish_time, time_text,
+                          cover_url, extra_json
+                   FROM raw_items
+                   WHERE title LIKE ? AND source = ?
+                   LIMIT 1""",
+                (f"{title_hint}%", source),
+            ).fetchone()
+        if not row:
+            return None
+        extra = json.loads(row[12]) if row[12] else {}
+        item = NewsItem(
+            id=str(row[1]),
+            raw_id=row[0],
+            title=row[2] or "",
+            source=row[3] or "",
+            source_type=row[4] or "",
+            url=row[5] or "",
+            desc=row[6] or "",
+            content=row[7] or "",
+            html_content=row[8] or "",
+            publish_time=row[9],
+            time_text=row[10] or "",
+            cover_url=row[11] or "",
+            extra=extra,
+        )
+        item.ensure_id()
+        return item
+
     def get_published_items_for_run(
         self,
         run_id: int,
