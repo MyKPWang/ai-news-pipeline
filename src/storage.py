@@ -298,6 +298,18 @@ class Storage:
                 }
         return cached
 
+    def get_item_stages(self, run_id: int, item_ids: list[str]) -> dict[str, str]:
+        """批量查询一批 item 在某 run 中的 stage，不存在则不在结果里。"""
+        if not item_ids:
+            return {}
+        placeholders = ",".join("?" for _ in item_ids)
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"SELECT item_id, stage FROM processed_items WHERE run_id = ? AND item_id IN ({placeholders})",
+                (run_id, *item_ids),
+            ).fetchall()
+        return {row[0]: row[1] for row in rows}
+
     def add_filter_event(
         self,
         run_id: int,
