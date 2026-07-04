@@ -78,16 +78,9 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         candidates = dedup_result.kept
 
         bge_result = bge_dedup(candidates, config)
-        # 批量查出已被前置拦截器标记为 review 的 item，避免 bge_dedup 重复写入覆盖
-        already_reviewed = storage.get_item_stages(run_id, [item.id for item, _ in bge_result.removed])
         for item, reason in bge_result.removed:
             storage.add_filter_event(run_id, "bge_dedup", "removed", item, raw_id_map.get(item.id), "semantic_duplicate", reason)
-            # 不覆盖已在 review 列表的文章
-            if already_reviewed.get(item.id) == "review":
-                _log(storage, run_id, "info", "pipeline", "bge_dedup_skip",
-                     f"item {item.id} already in review, skipping filtered overwrite")
-            else:
-                storage.upsert_processed(run_id, item, "filtered", raw_id_map.get(item.id))
+            storage.upsert_processed(run_id, item, "filtered", raw_id_map.get(item.id))
         candidates = bge_result.kept
         _log(storage, run_id, "info", "pipeline", "pre_llm", f"candidates={len(candidates)}")
 
