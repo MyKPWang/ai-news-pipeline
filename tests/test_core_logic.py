@@ -416,7 +416,11 @@ class RewriteAndAggregationTest(unittest.TestCase):
         self.assertIn("改写后的摘要内容。", html)
         self.assertIn('"title": "不要展示的原标题"', json.dumps(item.to_publish_dict(), ensure_ascii=False))
         self.assertIn(';">改写后的标题</h3>', html)
-        self.assertIn(';">来源：测试源 | 1小时前</p>', html)
+        self.assertIn(';">测试源 | 1小时前 | 原文链接：</p>', html)
+        self.assertIn(
+            '<p style="color:#666;font-size:13px;margin-top:0;"><a href="https://example.com" target="_blank" style="color:#1890ff;text-decoration:underline;">https://example.com</a></p>',
+            html,
+        )
         self.assertNotIn("来源：测试源  |", html)
         self.assertNotIn("不要展示的原标题", html)
         self.assertNotIn("不要展示的原摘要", html)
@@ -454,8 +458,11 @@ class RewriteAndAggregationTest(unittest.TestCase):
             html,
         )
         self.assertIn('<p style="color:#666;font-size:15px;margin-bottom:5px;">改写后的摘要内容。</p>', html)
-        self.assertIn('<p style="color:#666;font-size:13px;margin-top:0;">来源：测试源 | 1小时前</p>', html)
-        self.assertIn('<p style="color:#666;font-size:13px;margin-top:0;">原文链接：<a href="https://example.com"', html)
+        self.assertIn('<p style="color:#666;font-size:13px;margin-top:0;">测试源 | 1小时前 | 原文链接：</p>', html)
+        self.assertIn(
+            '<p style="color:#666;font-size:13px;margin-top:0;"><a href="https://example.com" target="_blank" style="color:#1890ff;text-decoration:underline;">https://example.com</a></p>',
+            html,
+        )
         self.assertIn('"title": "不要展示的原标题"', json.dumps(data["categories"][0]["items"][0], ensure_ascii=False))
         self.assertIn('"desc": "不要展示的原摘要"', json.dumps(data["categories"][0]["items"][0], ensure_ascii=False))
         self.assertNotIn("来源：测试源  |", html)
@@ -535,7 +542,7 @@ class MockPipelineTest(unittest.TestCase):
                 "wechat_publish": {"auto_publish": False},
             }
 
-            with patch("src.pipeline.collect_all_sources", return_value=(source_items, [])), patch(
+            with patch("src.pipeline.collect_all_sources", return_value=source_items), patch(
                 "src.pipeline.MiniMaxClient", FakeMiniMaxClient
             ), patch("src.pipeline.render_wechat_html", return_value=str(Path(tmp) / "wechat.html")) as render_html:
                 result = run_pipeline(config, no_publish=True)
@@ -608,7 +615,7 @@ class MockPipelineTest(unittest.TestCase):
                 "wechat_publish": {"auto_publish": False},
             }
 
-            with patch("src.pipeline.collect_all_sources", side_effect=lambda *_args: (make_source_items(), [])), patch(
+            with patch("src.pipeline.collect_all_sources", side_effect=lambda *_args: make_source_items()), patch(
                 "src.pipeline.MiniMaxClient", FakeMiniMaxClient
             ), patch("src.pipeline.render_wechat_html", return_value=str(Path(tmp) / "wechat.html")):
                 first = run_pipeline(config, no_publish=True)
