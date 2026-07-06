@@ -171,6 +171,10 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
             storage.upsert_processed(run_id, item, "publishable", raw_id_map.get(item.id))
 
         data = build_publish_data(publishable_items, global_info)
+        logger.info("[PUBLISH_DEBUG] build_publish_data: items_count=%d, hot_items=%s, insight=%s",
+                     len(publishable_items),
+                     global_info.get('hot_topics', [])[:3],
+                     global_info.get('insight', '')[:100])
         title = build_article_title()
         sources = collect_sources(publishable_items)
         html_path = render_wechat_html(data, title, sources, config)
@@ -179,7 +183,11 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         _save_global_info_for_run(run_id, run_date, global_info)
 
         should_publish = should_upload(config, no_publish, selected_items, publishable_items, review_items)
+        logger.info("[PUBLISH_DEBUG] should_publish=%s, publishable=%d, selected=%d, review=%d",
+                     should_publish, len(publishable_items), len(selected_items), len(review_items))
         if should_publish:
+            logger.info("[PUBLISH_DEBUG] categories=%s",
+                         [{"name": c["name"], "count": len(c["items"])} for c in data.get("categories", [])])
             published = publish_to_wechat_tool(data, title, sources, config)
 
         review_path = export_outputs(config, storage, run_id, run_date, raw_items, publishable_items, review_items)
@@ -633,6 +641,9 @@ def handle_supplement(
     title = build_article_title()
     sources = collect_sources(combined_items)
     data = build_publish_data(combined_items, global_info)
+    logger.info("[SUPPLEMENT_DEBUG] combined_items=%d, categories=%s",
+                 len(combined_items),
+                 [{"name": c["name"], "count": len(c["items"])} for c in data.get("categories", [])])
 
     html_path = render_wechat_html(data, title, sources, config)
 
