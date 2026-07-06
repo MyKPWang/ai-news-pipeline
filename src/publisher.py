@@ -14,7 +14,14 @@ def render_wechat_html(
 ) -> str:
     module = _load_publish_module(Path(tool_dir))
     author = config.get("wechat_publish", {}).get("author", "Valkyrie")
-    html_content = module.generate_html(data, title, sources=sources, author=author)
+    compliance_contact = config.get("compliance", {}).get("contact", "")
+    html_content = module.generate_html(
+        data,
+        title,
+        sources=sources,
+        author=author,
+        compliance_contact=compliance_contact,
+    )
     return str(module.save_html(html_content, title))
 
 
@@ -28,7 +35,8 @@ def publish_to_wechat_tool(
     module = _load_publish_module(tool_dir)
     _write_tool_config(tool_dir, config)
     author = config.get("wechat_publish", {}).get("author", "Valkyrie")
-    return bool(module.publish_news(data, title, sources=sources, author=author))
+    compliance_contact = config.get("compliance", {}).get("contact", "")
+    return bool(module.publish_news(data, title, sources=sources, author=author, compliance_contact=compliance_contact))
 
 
 def _load_publish_module(tool_dir: Path):
@@ -62,4 +70,5 @@ def _write_tool_config(tool_dir: Path, config: dict) -> None:
     current["app_secret"] = app_secret
     if publish_config.get("thumb_media_id"):
         current["thumb_media_id"] = publish_config["thumb_media_id"]
+    current["compliance_contact"] = config.get("compliance", {}).get("contact", "")
     path.write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")

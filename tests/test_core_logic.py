@@ -177,6 +177,26 @@ class LlmLogicTest(unittest.TestCase):
         self.assertIn("苹果下一代系统", prompt)
         self.assertIn("除非素材明确写的是“iOS 27”", prompt)
 
+    def test_rewrite_prompt_requires_short_guided_briefs_for_wechat(self):
+        item = NewsItem(
+            title="某公众号深度解析端侧模型落地",
+            desc="文章分析了端侧模型在手机系统中的多个应用场景。",
+            source_type="wechat_mp",
+        )
+
+        prompt = build_rewrite_prompt([item], max_content_chars=200)
+
+        self.assertIn("短事实导读", prompt)
+        self.assertIn("不替代原文阅读", prompt)
+        self.assertIn("公众号来源要求 50-80 字", prompt)
+        self.assertIn("门户来源建议 70-110 字", prompt)
+        self.assertIn("更多细节可查看原文", prompt)
+        self.assertIn("具体内容见原文", prompt)
+        self.assertIn("完整信息以原文为准", prompt)
+        self.assertIn("深度好文", prompt)
+        self.assertIn("悬念式提问", prompt)
+        self.assertIn('"source_type": "公众号"', prompt)
+
     def test_selection_prompt_includes_source_priority_and_duplicate_policy(self):
         wechat = NewsItem(title="系统级 AI 能力发布", desc="官方公众号发布。", source_type="wechat_mp")
         portal = NewsItem(title="系统级 AI 能力发布", desc="网页报道同一事件。", source_type="portal")
@@ -391,6 +411,57 @@ class RewriteAndAggregationTest(unittest.TestCase):
         self.assertEqual([item], publishable)
         self.assertEqual([], review)
 
+    def test_validate_rewritten_uses_stricter_wechat_copy_threshold(self):
+        repeated = "苹果系统级人工智能能力覆盖多个应用场景并支持本地模型处理用户任务"
+        wechat = NewsItem(
+            title=repeated,
+            desc="",
+            source_type="wechat_mp",
+            rewritten_title="苹果系统 AI 能力更新",
+            summary=f"{repeated}，更多细节可查看原文。",
+        )
+        portal = NewsItem(
+            title=repeated,
+            desc="",
+            source_type="portal",
+            rewritten_title="苹果系统 AI 能力更新",
+            summary=f"{repeated}，更多细节可查看原文。",
+        )
+
+        publishable, review = validate_rewritten([wechat, portal], copy_threshold=50)
+
+        self.assertEqual([portal], publishable)
+        self.assertEqual([wechat], review)
+        self.assertIn("possible_copying", wechat.risk_flags)
+        self.assertNotIn("possible_copying", portal.risk_flags)
+
+    def test_validate_rewritten_limits_guided_brief_lengths_by_source_type(self):
+        wechat = NewsItem(
+            title="微信来源标题",
+            source_type="wechat_mp",
+            rewritten_title="微信来源改写标题",
+            summary="微" * 91,
+        )
+        portal = NewsItem(
+            title="门户来源标题",
+            source_type="portal",
+            rewritten_title="门户来源改写标题",
+            summary="门" * 121,
+        )
+        ok = NewsItem(
+            title="合规来源标题",
+            source_type="wechat_mp",
+            rewritten_title="合规来源改写标题",
+            summary="合" * 80,
+        )
+
+        publishable, review = validate_rewritten([wechat, portal, ok])
+
+        self.assertEqual([ok], publishable)
+        self.assertEqual([wechat, portal], review)
+        self.assertIn("summary_too_long", wechat.risk_flags)
+        self.assertIn("summary_too_long", portal.risk_flags)
+
     def test_wechat_html_does_not_fallback_to_original_title_or_desc(self):
         item = NewsItem(
             title="不要展示的原标题",
@@ -424,6 +495,8 @@ class RewriteAndAggregationTest(unittest.TestCase):
         self.assertNotIn("来源：测试源  |", html)
         self.assertNotIn("不要展示的原标题", html)
         self.assertNotIn("不要展示的原摘要", html)
+        self.assertIn("本文为公开资讯线索整理", html)
+        self.assertIn("公众号后台留言", html)
 
     def test_wechat_publish_template_uses_original_structure(self):
         item = NewsItem(
@@ -452,7 +525,9 @@ class RewriteAndAggregationTest(unittest.TestCase):
         )
 
         self.assertIn("<h3", html)
-        self.assertIn("{{ item.rewritten_title or item.title }}", template_source)
+        self.assertIn("{{ item.rewritten_title }}", template_source)
+        self.assertNotIn("or item.title", template_source)
+        self.assertNotIn("elif item.desc", template_source)
         self.assertIn(
             '<h3 style="color:#1890ff;font-weight:bold;font-size:17px;margin-top:15px;margin-bottom:5px;">改写后的标题</h3>',
             html,
@@ -468,6 +543,8 @@ class RewriteAndAggregationTest(unittest.TestCase):
         self.assertNotIn("来源：测试源  |", html)
         self.assertNotIn("\n            改写后的标题", html)
         self.assertNotIn("来源：测试源\n", html)
+        self.assertIn("本文为公开资讯线索整理", html)
+        self.assertIn("公众号后台留言", html)
 
 
 class MockPipelineTest(unittest.TestCase):

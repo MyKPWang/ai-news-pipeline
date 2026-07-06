@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -13,6 +14,7 @@ class MockWechatHandler(BaseHTTPRequestHandler):
     token_requests = 0
     mps_requests = 0
     articles_requests: list[str] = []
+    publish_time_ms = 0
 
     def do_POST(self):
         if self.path == "/api/v1/wx/auth/token":
@@ -69,7 +71,7 @@ class MockWechatHandler(BaseHTTPRequestHandler):
                                 "title": "苹果发布系统级 AI 能力",
                                 "description": "苹果在系统应用中加入新的智能能力。",
                                 "content": "<p>正文内容</p>",
-                                "publish_time": 1760000000000,
+                                "publish_time": MockWechatHandler.publish_time_ms,
                                 "url": "https://mp.weixin.qq.com/s/example1",
                                 "pic_url": "https://example.com/cover.jpg",
                                 "has_content": 1,
@@ -105,6 +107,7 @@ class WechatApiSourceMockTest(unittest.TestCase):
         MockWechatHandler.token_requests = 0
         MockWechatHandler.mps_requests = 0
         MockWechatHandler.articles_requests = []
+        MockWechatHandler.publish_time_ms = int(time.time() * 1000)
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), MockWechatHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -143,7 +146,7 @@ class WechatApiSourceMockTest(unittest.TestCase):
         self.assertEqual("测试公众号", item.source)
         self.assertEqual("wechat_mp", item.source_type)
         self.assertEqual("https://mp.weixin.qq.com/s/example1", item.url)
-        self.assertEqual(1760000000, item.publish_time)
+        self.assertEqual(MockWechatHandler.publish_time_ms // 1000, item.publish_time)
         self.assertEqual("https://example.com/cover.jpg", item.cover_url)
         self.assertEqual("article-1", item.extra["article_id"])
 

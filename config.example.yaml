@@ -76,6 +76,9 @@ wechat_publish:
   auto_publish: false
   author: "Valkyrie"
 
+compliance:
+  contact: ""
+
 output:
   database_path: "data/news.db"
   save_raw_json: true
@@ -86,6 +89,6 @@ output:
   stop_publish_on_llm_error: true
   stop_publish_on_rewrite_warning: true
   require_rewritten_title_and_summary: true
-  copy_check_threshold: 20
+  copy_check_threshold: 50
   max_review_ratio_for_publish: 0.3
   min_publishable_items: 3

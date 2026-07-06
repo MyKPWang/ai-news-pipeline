@@ -70,7 +70,13 @@ def ensure_thumb_media_id(config: dict) -> str:
     return media_id
 
 
-def generate_html(data: dict, title: str, sources: List[str] = None, author: str = None) -> str:
+def generate_html(
+    data: dict,
+    title: str,
+    sources: List[str] = None,
+    author: str = None,
+    compliance_contact: str = None,
+) -> str:
     """生成HTML文档"""
     from jinja2 import Environment, FileSystemLoader
 
@@ -93,6 +99,7 @@ def generate_html(data: dict, title: str, sources: List[str] = None, author: str
         sources_str = "来源：" + "、".join(sources)
     else:
         sources_str = ""
+    contact = compliance_contact or "公众号后台留言"
 
     html_content = template.render(
         title=title,
@@ -102,7 +109,8 @@ def generate_html(data: dict, title: str, sources: List[str] = None, author: str
         github_trending=github_trending,
         sources_str=sources_str,
         author=author,
-        date=datetime.now().strftime("%Y年%m月%d日")
+        date=datetime.now().strftime("%Y年%m月%d日"),
+        compliance_contact=contact,
     )
 
     return html_content
@@ -165,7 +173,13 @@ def upload_to_wechat(html_content: str, title: str, thumb_media_id: str, config:
         return False
 
 
-def publish_news(data: dict, title: str, sources: List[str] = None, author: str = None) -> bool:
+def publish_news(
+    data: dict,
+    title: str,
+    sources: List[str] = None,
+    author: str = None,
+    compliance_contact: str = None,
+) -> bool:
     """
     通用微信公众号发布函数
 
@@ -209,7 +223,13 @@ def publish_news(data: dict, title: str, sources: List[str] = None, author: str 
         print(f"   ✅ thumb_media_id: {thumb_media_id}")
 
         # 3. 生成HTML
-        html_content = generate_html(data, title, sources, author)
+        html_content = generate_html(
+            data,
+            title,
+            sources,
+            author,
+            compliance_contact or config.get("compliance_contact", ""),
+        )
 
         # 4. 保存本地
         save_html(html_content, title)

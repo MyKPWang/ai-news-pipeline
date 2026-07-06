@@ -285,11 +285,13 @@ def validate_rewritten(items: list[NewsItem], copy_threshold: int = 20) -> tuple
     review: list[NewsItem] = []
     for item in items:
         if not item.rewritten_title.strip():
-            item.risk_flags.append("missing_rewritten_title")
+            _append_risk(item, "missing_rewritten_title")
         if not item.summary.strip():
-            item.risk_flags.append("missing_summary")
-        if has_long_copy(item, threshold=copy_threshold):
-            item.risk_flags.append("possible_copying")
+            _append_risk(item, "missing_summary")
+        if item.summary.strip() and len(item.summary.strip()) > _summary_limit_for_item(item):
+            _append_risk(item, "summary_too_long")
+        if has_long_copy(item, threshold=_copy_threshold_for_item(item, copy_threshold)):
+            _append_risk(item, "possible_copying")
         # unverified_rumor 不作为发布障碍，只记录在 review 里供参考
         blocking_flags = [f for f in item.risk_flags if f not in ("unverified_rumor",)]
         if blocking_flags:
@@ -298,6 +300,21 @@ def validate_rewritten(items: list[NewsItem], copy_threshold: int = 20) -> tuple
         else:
             publishable.append(item)
     return publishable, review
+
+
+def _append_risk(item: NewsItem, flag: str) -> None:
+    if flag not in item.risk_flags:
+        item.risk_flags.append(flag)
+
+
+def _summary_limit_for_item(item: NewsItem) -> int:
+    return 90 if item.source_type == "wechat_mp" else 120
+
+
+def _copy_threshold_for_item(item: NewsItem, default_threshold: int) -> int:
+    if item.source_type == "wechat_mp":
+        return min(default_threshold, 30)
+    return default_threshold
 
 
 def has_long_copy(item: NewsItem, threshold: int = 10) -> bool:
