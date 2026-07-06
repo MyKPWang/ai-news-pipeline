@@ -121,6 +121,50 @@ python3 -m unittest discover -s tests
 
 测试覆盖时间解析、规则过滤、去重、LLM JSON 解析和序号映射、改写合规校验、HTML 原文 fallback 防护、mock pipeline，以及微信公众号 Docker API 客户端 mock。
 
+### 微信公众号 Docker API 验证测试
+
+验证 we-mp-rss 容器提供的 REST API 功能是否正常：
+
+```bash
+# 方式一：运行完整测试脚本（推荐）
+python3 scripts/wechat_api_test.py
+
+# 方式二：手动快速检查
+docker exec we-mp-rss /app/env_x86_64/bin/python3 -c "
+import sqlite3, datetime
+conn = sqlite3.connect('/app/data/db.db')
+c = conn.cursor()
+c.execute('SELECT COUNT(*), MAX(publish_time) FROM articles')
+r = c.fetchone()
+print(f'文章总数: {r[0]}, 最新: {datetime.datetime.fromtimestamp(r[1]).strftime(\"%Y-%m-%d %H:%M\") if r[1] else \"N/A\"}')"
+```
+
+#### 测试用例说明（scripts/wechat_api_test.py）
+
+| 用例 | 验证内容 | 预期结果 |
+|------|---------|---------|
+| TEST 1 | API 认证（POST /api/v1/wx/auth/token） | 获取到 access_token |
+| TEST 2 | 全局查询 offset/limit 组合 | offset 翻页连续，publish_time 全局严格降序 |
+| TEST 3 | per-mp_id 查询各账号排序 | 所有账号 per-mp_id 查询均按 publish_time 降序 |
+| TEST 4 | 全局 vs per-mp_id 数据覆盖 | 全局无 mp_id 时跨所有账号；per-mp_id 只查单个账号 |
+| TEST 5 | time_filter 模拟（lookback_hours=24） | 各账号 >24h 文章数反映该账号真实发布频率 |
+
+#### 关键发现（2026-06-29）
+
+- **API 排序无 bug**：全局查询和 per-mp_id 查询均正确按 `publish_time` 降序，测试 5 个账号 0 个异常
+- **分页正确**：offset=0/20/40/80 翻页连续，无重复、无遗漏
+- **数据稀疏性是主要因素**：全局查询 100 条中约 19 条 <24h，约 81 条 >24h。原因是部分公众号本身发布频率低（2-3 天一发），不是 API 排序问题
+- **各账号更新时间差异大**：部分账号最新文章已达 48-68 小时前（如 Android 开发者、HarmonyOS开发者技术），这些账号的 >24h 文章会全部被 Pipeline time_filter 拦掉进入 review list
+
+#### 常见异常与排查
+
+| 现象 | 排查命令 | 可能原因 |
+|------|---------|---------|
+| API 返回 401 | 检查 secrets.yaml 中 docker_api 用户名/密码 | 凭证错误 |
+| 文章总数不增加 | `docker logs we-mp-rss --since=10m` | 定时采集任务未执行或 Cookie 失效 |
+| 最新 publish_time 落后 >24h | 对比采集日志与数据库 | we-mp-rss 未重启但采集循环卡住 |
+| per-mp_id 返回空 | 确认公众号 mp_id 格式正确 | mp_id 不存在或账号从未被采集 |
+
 ### 真实门户抓取 Smoke
 
 验证虎嗅、量子位、AIBase 页面结构是否仍和采集代码适配：

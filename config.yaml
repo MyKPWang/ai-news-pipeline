@@ -1,0 +1,112 @@
+# Non-sensitive runtime configuration. Copy to config.yaml for local use.
+
+docker_api:
+  base_url: "http://localhost:4000"
+  page_size: 20
+  request_timeout_seconds: 20
+  fetch_article_detail: false
+
+wechat_accounts:
+  - name: "千问APP"
+    mp_id: "MP_WXS_3634190101"
+  - name: "豆包"
+    mp_id: "MP_WXS_3931663331"
+  - name: "DeepSeek"
+    mp_id: "MP_WXS_3554086560"
+  - name: "华为"
+    mp_id: "MP_WXS_2398264963"
+  - name: "小米技术"
+    mp_id: "MP_WXS_3510410326"
+  - name: "Apple开发者"
+    mp_id: "MP_WXS_3945721857"
+  - name: "量子位"
+    mp_id: "MP_WXS_3236757533"
+  - name: "新智元"
+    mp_id: "MP_WXS_3271041950"
+  - name: "机器之心"
+    mp_id: "MP_WXS_3073282833"
+  - name: "字节跳动技术团队"
+    mp_id: "MP_WXS_3253632141"
+  - name: "千问大模型"
+    mp_id: "MP_WXS_3948884294"
+  - name: "HarmonyOS开发者技术"
+    mp_id: "MP_WXS_3904143447"
+  - name: "通义实验室"
+    mp_id: "MP_WXS_3911621034"
+  - name: "APPSO"
+    mp_id: "MP_WXS_2392024520"
+  - name: "AI前线"
+    mp_id: "MP_WXS_3554086560"
+  - name: "智东西"
+    mp_id: "MP_WXS_3081486433"
+
+portal_sites:
+  - name: "huxiu"
+    enabled: true
+    list_url: "https://www.huxiu.com/ainews/"
+    max_pages: 1
+    fetch_detail: false
+  - name: "qbitai"
+    enabled: true
+    list_url: "https://www.qbitai.com/category/%E8%B5%84%E8%AE%AF"
+    max_pages: 1
+    fetch_detail: false
+  - name: "aibase"
+    enabled: true
+    list_url: "https://news.aibase.com/zh/news"
+    max_pages: 1
+    fetch_detail: false
+
+minimax_api:
+  model: "MiniMax-M2.7"
+  base_url: "https://api.minimax.chat/v1"
+  timeout_seconds: 300
+  max_retries: 3
+  selection_temperature: 0.2
+  rewrite_temperature: 0.4
+  selection_batch_size: 40
+  rewrite_batch_size: 4
+  rewrite_batch_size_cap: 4
+  selection_max_tokens: 10000
+  rewrite_max_tokens: 10000
+  use_content_if_available: true
+  fetch_article_detail_for_rewrite: false
+  max_content_chars: 2000
+
+bge_model:
+  path: ""
+  name: "BAAI/bge-small-zh-v1.5"
+  threshold: 0.85
+  enabled: true
+  force_gc_after_run: true
+
+runtime:
+  lookback_hours: 24
+  default_no_publish: false
+  reuse_rewrite_cache: true
+
+wechat_publish:
+  thumb_media_id: ""
+  auto_publish: true
+  author: "Valkyrie"
+
+review_list:
+  feishu_enabled: true
+  feishu_user_id: "ou_5c3a069d031b2ac966bf04bfa6b822e7"
+  include_time_filter: false
+  include_quality_filter: true
+  include_keyword_filter: true
+
+output:
+  database_path: "data/news.db"
+  save_raw_json: true
+  save_processed_json: true
+  save_html: true
+  app_log_path: "logs/app_{date}.log"
+  llm_log_path: "logs/llm_{date}.jsonl"
+  stop_publish_on_llm_error: true
+  stop_publish_on_rewrite_warning: true
+  require_rewritten_title_and_summary: true
+  copy_check_threshold: 50
+  max_review_ratio_for_publish: 5.0
+  min_publishable_items: 0

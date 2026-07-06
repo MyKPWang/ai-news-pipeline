@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable
+
+logger = logging.getLogger(__name__)
 
 from .models import NewsItem
 
@@ -175,32 +178,38 @@ class Storage:
         with self.connect() as conn:
             for item in items:
                 item.ensure_id()
-                conn.execute(
-                    """
-                    insert or ignore into raw_items(
-                        item_id, run_id, source, source_type, title, desc, content,
-                        html_content, url, publish_time, time_text, cover_url,
-                        extra_json, created_at
+                try:
+                    conn.execute(
+                        """
+                        insert into raw_items(
+                            item_id, run_id, source, source_type, title, desc, content,
+                            html_content, url, publish_time, time_text, cover_url,
+                            extra_json, created_at
+                        )
+                        values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            item.id,
+                            run_id,
+                            item.source,
+                            item.source_type,
+                            item.title,
+                            item.desc,
+                            item.content,
+                            item.html_content,
+                            item.url,
+                            item.publish_time,
+                            item.time_text,
+                            item.cover_url,
+                            json.dumps(item.extra or {}, ensure_ascii=False),
+                            utc_now_iso(),
+                        ),
                     )
-                    values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        item.id,
-                        run_id,
-                        item.source,
-                        item.source_type,
-                        item.title,
-                        item.desc,
-                        item.content,
-                        item.html_content,
-                        item.url,
-                        item.publish_time,
-                        item.time_text,
-                        item.cover_url,
-                        json.dumps(item.extra or {}, ensure_ascii=False),
-                        utc_now_iso(),
-                    ),
-                )
+                except Exception:
+                    logger.warning(
+                        "insert_raw_items: item_id=%s run_id=%d title=%s skipped (constraint): %s",
+                        item.id, run_id, (item.title or "")[:30], item.url[:50] if item.url else "",
+                    )
             rows = conn.execute(
                 "select id, item_id from raw_items where run_id = ?", (run_id,)
             ).fetchall()
@@ -226,7 +235,9 @@ class Storage:
                 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(run_id, item_id) do update set
                     raw_item_id = excluded.raw_item_id,
-                    stage = excluded.stage,
+                    stage = CASE
+                        WHEN stage = 'review' THEN stage
+                        ELSE excluded.stage END,
                     category = excluded.category,
                     selected = excluded.selected,
                     selection_reason = excluded.selection_reason,
@@ -387,3 +398,242 @@ class Storage:
         with output.open("w", encoding="utf-8") as f:
             json.dump([item.to_dict() for item in items], f, ensure_ascii=False, indent=2)
         return str(output)
+
+    def get_review_items_from_processed(
+        self, run_id: int, order_by_source: bool = False
+    ) -> list[NewsItem]:
+        """直接从 processed_items 表查询 stage='review' 的文章（供 supplement 使用）。
+
+        Args:
+            run_id: 要查询的 run ID
+            order_by_source: True 时按 ri.source, ri.id 排序（与通知列表顺序一致），
+                            False 时按 ri.publish_time DESC 排序
+        """
+        order_clause = "ri.source, ri.id" if order_by_source else "ri.publish_time desc"
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""
+                select
+                    ri.id,
+                    ri.item_id,
+                    ri.title,
+                    ri.source,
+                    ri.url,
+                    ri.desc,
+                    ri.publish_time,
+                    ri.time_text,
+                    ri.extra_json,
+                    pi.selection_reason,
+                    pi.core_fact,
+                    pi.rewritten_title,
+                    pi.summary
+                from processed_items pi
+                join raw_items ri on ri.id = pi.raw_item_id
+                where pi.run_id = ? and pi.stage = 'review'
+                order by {order_clause}
+                """,
+                (run_id,),
+            ).fetchall()
+
+        items: list[NewsItem] = []
+        for row in rows:
+            extra = json.loads(row[8]) if row[8] else {}
+            item = NewsItem(
+                id=str(row[1]),
+                raw_id=row[0],
+                title=row[2] or "",
+                source=row[3] or "",
+                url=row[4] or "",
+                desc=row[5] or "",
+                publish_time=row[6],
+                time_text=row[7] or "",
+                extra=extra,
+            )
+            item.ensure_id()
+            items.append(item)
+        return items
+
+    def get_raw_item_by_id(self, raw_id: int) -> NewsItem | None:
+        """通过 raw_items 表的主键 ID 获取单条记录。"""
+        with self.connect() as conn:
+            row = conn.execute(
+                """SELECT id, item_id, title, source, source_type, url, desc,
+                          content, html_content, publish_time, time_text,
+                          cover_url, extra_json
+                   FROM raw_items WHERE id = ?""",
+                (raw_id,),
+            ).fetchone()
+        if not row:
+            return None
+        extra = json.loads(row[12]) if row[12] else {}
+        item = NewsItem(
+            id=str(row[1]),
+            raw_id=row[0],
+            title=row[2] or "",
+            source=row[3] or "",
+            source_type=row[4] or "",
+            url=row[5] or "",
+            desc=row[6] or "",
+            content=row[7] or "",
+            html_content=row[8] or "",
+            publish_time=row[9],
+            time_text=row[10] or "",
+            cover_url=row[11] or "",
+            extra=extra,
+        )
+        item.ensure_id()
+        return item
+
+    def get_raw_item_by_title_source(self, title: str, source: str) -> NewsItem | None:
+        """通过标题（前30字）+来源查找 raw_items 表里的单条记录。"""
+        title_hint = title[:30] if title else ""
+        with self.connect() as conn:
+            row = conn.execute(
+                """SELECT id, item_id, title, source, source_type, url, desc,
+                          content, html_content, publish_time, time_text,
+                          cover_url, extra_json
+                   FROM raw_items
+                   WHERE title LIKE ? AND source = ?
+                   LIMIT 1""",
+                (f"{title_hint}%", source),
+            ).fetchone()
+        if not row:
+            return None
+        extra = json.loads(row[12]) if row[12] else {}
+        item = NewsItem(
+            id=str(row[1]),
+            raw_id=row[0],
+            title=row[2] or "",
+            source=row[3] or "",
+            source_type=row[4] or "",
+            url=row[5] or "",
+            desc=row[6] or "",
+            content=row[7] or "",
+            html_content=row[8] or "",
+            publish_time=row[9],
+            time_text=row[10] or "",
+            cover_url=row[11] or "",
+            extra=extra,
+        )
+        item.ensure_id()
+        return item
+
+    def get_published_items_for_run(
+        self,
+        run_id: int,
+    ) -> list[NewsItem]:
+        """获取指定 run 的所有 publishable 文章（含 rewrite 后的数据）。"""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select
+                    ri.item_id,
+                    ri.title,
+                    ri.source,
+                    ri.url,
+                    ri.desc,
+                    ri.publish_time,
+                    ri.time_text,
+                    ri.extra_json,
+                    pi.category,
+                    pi.selection_reason,
+                    pi.core_fact,
+                    pi.rewritten_title,
+                    pi.summary,
+                    pi.risk_flags_json
+                from processed_items pi
+                join raw_items ri on ri.id = pi.raw_item_id
+                where pi.run_id = ?
+                  and pi.stage in ('publishable', 'rewritten')
+                order by pi.updated_at asc
+                """,
+                (run_id,),
+            ).fetchall()
+
+        items: list[NewsItem] = []
+        for row in rows:
+            extra = json.loads(row[7]) or {} if row[7] else {}
+            try:
+                risk_flags = json.loads(row[13] or "[]")
+            except json.JSONDecodeError:
+                risk_flags = []
+            item = NewsItem(
+                id=str(row[0]),
+                title=row[1] or "",
+                source=row[2] or "",
+                url=row[3] or "",
+                desc=row[4] or "",
+                publish_time=row[5],
+                time_text=row[6] or "",
+                extra=extra,
+            )
+            item.ensure_id()
+            item.category = row[8] or ""
+            item.selection_reason = row[9] or ""
+            item.core_fact = row[10] or ""
+            item.rewritten_title = row[11] or ""
+            item.summary = row[12] or ""
+            item.risk_flags = risk_flags if isinstance(risk_flags, list) else []
+            items.append(item)
+        return items
+
+
+
+    def get_published_items_for_run(
+        self,
+        run_id: int,
+    ) -> list[NewsItem]:
+        """获取指定 run 的所有 publishable 文章（含 rewrite 后的数据）。"""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select
+                    ri.item_id,
+                    ri.title,
+                    ri.source,
+                    ri.url,
+                    ri.desc,
+                    ri.publish_time,
+                    ri.time_text,
+                    ri.extra_json,
+                    pi.category,
+                    pi.selection_reason,
+                    pi.core_fact,
+                    pi.rewritten_title,
+                    pi.summary,
+                    pi.risk_flags_json
+                from processed_items pi
+                join raw_items ri on ri.id = pi.raw_item_id
+                where pi.run_id = ?
+                  and pi.stage in ('publishable', 'rewritten')
+                order by pi.updated_at asc
+                """,
+                (run_id,),
+            ).fetchall()
+
+        items: list[NewsItem] = []
+        for row in rows:
+            extra = json.loads(row[7]) or {} if row[7] else {}
+            try:
+                risk_flags = json.loads(row[13] or "[]")
+            except json.JSONDecodeError:
+                risk_flags = []
+            item = NewsItem(
+                id=str(row[0]),
+                title=row[1] or "",
+                source=row[2] or "",
+                url=row[3] or "",
+                desc=row[4] or "",
+                publish_time=row[5],
+                time_text=row[6] or "",
+                extra=extra,
+            )
+            item.ensure_id()
+            item.category = row[8] or ""
+            item.selection_reason = row[9] or ""
+            item.core_fact = row[10] or ""
+            item.rewritten_title = row[11] or ""
+            item.summary = row[12] or ""
+            item.risk_flags = risk_flags if isinstance(risk_flags, list) else []
+            items.append(item)
+        return items

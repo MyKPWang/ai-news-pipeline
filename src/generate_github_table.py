@@ -310,10 +310,10 @@ def generate_github_trending_table(github_items: list, output_dir: Path) -> Opti
     img_path = str(output_dir / "github_trending.png")
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch()
+            browser = p.chromium.launch(timeout=30000)  # 30s 超时，防止卡住
             page = browser.new_page()
             page.set_viewport_size({"width": 880, "height": 1600})
-            page.goto(f"file://{html_debug_path.absolute()}", wait_until="domcontentloaded")
+            page.goto(f"file://{html_debug_path.absolute()}", wait_until="domcontentloaded", timeout=30000)
             page.wait_for_timeout(1000)
             page.screenshot(path=img_path, full_page=True)
             browser.close()

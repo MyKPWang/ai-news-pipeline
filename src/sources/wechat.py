@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 from typing import Any
 
 import requests
@@ -26,26 +27,34 @@ class WechatApiSource(Source):
         fetch_detail = bool(api_config.get("fetch_article_detail", False))
 
         token = self._get_token(base_url, username, password, timeout)
-        mp_ids = self._get_mp_ids(base_url, token, timeout)
+
+        # 优先使用 config 中明确配置的 mp_id
         configured = [x.get("mp_id") for x in self.config.get("wechat_accounts", []) if x.get("mp_id")]
         if configured:
-            mp_ids = sorted(set(mp_ids) | set(configured))
+            mp_ids = sorted(set(configured))
+        else:
+            # 兜底：从 Docker 数据库获取所有公众号 ID
+            mp_ids = self._get_mp_ids(base_url, token, timeout)
 
-        items: list[NewsItem] = []
-        if not mp_ids:
-            logger.info("No mp_ids discovered; querying all articles.")
-            items.extend(self._get_articles(base_url, token, None, page_size, timeout, fetch_detail))
-            return items
+        # 计算时间窗口
+        lookback_hours = int(self.config.get("runtime", {}).get("lookback_hours", 24))
+        now = datetime.now()
+        threshold = now - timedelta(hours=lookback_hours)
+        threshold_ts = int(threshold.timestamp())
 
+        # 逐个公众号查询，确保每个都拉到
+        all_items: list[NewsItem] = []
         for mp_id in mp_ids:
             try:
-                items.extend(
-                    self._get_articles(base_url, token, mp_id, page_size, timeout, fetch_detail)
+                all_items.extend(
+                    self._get_articles(base_url, token, mp_id, 15, timeout, fetch_detail, threshold_ts)
                 )
             except Exception as exc:
                 logger.warning("Wechat article query failed for %s: %s", mp_id, exc)
 
-        return items
+        # 按 publish_time 降序排序（最新的在前）
+        all_items.sort(key=lambda x: x.publish_time or 0, reverse=True)
+        return all_items
 
     def _get_token(self, base_url: str, username: str, password: str, timeout: int) -> str:
         if not username or not password:
@@ -84,8 +93,9 @@ class WechatApiSource(Source):
         page_size: int,
         timeout: int,
         fetch_detail: bool,
+        threshold_ts: int | None = None,
     ) -> list[NewsItem]:
-        params: dict[str, Any] = {"page": 1, "page_size": page_size}
+        params: dict[str, Any] = {"offset": 0, "limit": page_size}
         if mp_id:
             params["mp_id"] = mp_id
         resp = requests.get(
@@ -102,6 +112,16 @@ class WechatApiSource(Source):
 
         items: list[NewsItem] = []
         for row in rows:
+            # 按 publish_time 过滤，只保留 lookback 窗口内的文章
+            row_pt = row.get("publish_time")
+            if row_pt:
+                row_ts = normalize_timestamp(row_pt)
+            else:
+                row_ts = None
+
+            if threshold_ts is not None and row_ts is not None and row_ts < threshold_ts:
+                continue
+
             item = self._row_to_item(row)
             if fetch_detail and row.get("id") and row.get("has_content"):
                 item.html_content = self._get_article_detail(base_url, token, str(row["id"]), timeout)
