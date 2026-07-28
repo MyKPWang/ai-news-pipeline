@@ -19,6 +19,7 @@ from src.llm.prompts import build_global_selection_prompt, build_rewrite_prompt
 from src.models import NewsItem
 from src.pipeline import run_pipeline, sort_by_source_priority, validate_rewritten
 from src.publisher import render_wechat_html
+from src.sources.portals import HuxiuPortal
 from src.time_utils import parse_time_value
 
 
@@ -44,6 +45,75 @@ class TimeParsingTest(unittest.TestCase):
             int(datetime(2026, 5, 24, 9, 30).timestamp()),
             parse_time_value("2026-05-24 09:30", now),
         )
+
+
+class HuxiuPortalTest(unittest.TestCase):
+    SITE_CONFIG = {
+        "name": "huxiu",
+        "list_url": "https://www.huxiu.com/ainews/",
+    }
+
+    @staticmethod
+    def normal_html() -> str:
+        nuxt_data = [
+            {"aiNewsList": 1, "ainews_id": 2},
+            [3],
+            {"ainews_id": 4},
+            {"ainews_id": 5, "title": 6, "desc": 7, "publish_time": 8},
+            "10001",
+            "10001",
+            "虎嗅测试标题",
+            "虎嗅测试摘要",
+            1785253995000,
+        ]
+        return f'<script id="__NUXT_DATA__" type="application/json">{json.dumps(nuxt_data)}</script>'
+
+    def test_collect_uses_stealth_mode_by_default_and_parses_items(self):
+        portal = HuxiuPortal(self.SITE_CONFIG, {})
+        with patch.object(portal, "_fetch_html_with_stealth", return_value=self.normal_html()) as stealth_fetch:
+            with patch.object(portal, "_fetch_html_with_persistent_chrome") as chrome_fetch:
+                items = portal.collect()
+
+        stealth_fetch.assert_called_once()
+        chrome_fetch.assert_not_called()
+        self.assertEqual(1, len(items))
+        self.assertEqual("虎嗅测试标题", items[0].title)
+        self.assertEqual("https://www.huxiu.com/ainews/10001.html", items[0].url)
+
+    def test_collect_retries_with_persistent_chrome_after_waf_when_enabled(self):
+        portal = HuxiuPortal(
+            self.SITE_CONFIG,
+            {
+                "portal_browser": {
+                    "huxiu": {
+                        "mode": "stealth",
+                        "fallback_to_persistent_chrome": True,
+                    }
+                }
+            },
+        )
+        waf_html = "<title>Verification</title><meta name=\"aliyun_waf_aa\">"
+        with patch.object(portal, "_fetch_html_with_stealth", return_value=waf_html) as stealth_fetch:
+            with patch.object(
+                portal,
+                "_fetch_html_with_persistent_chrome",
+                return_value=self.normal_html(),
+            ) as chrome_fetch:
+                items = portal.collect()
+
+        stealth_fetch.assert_called_once()
+        chrome_fetch.assert_called_once()
+        self.assertEqual(1, len(items))
+
+    def test_collect_returns_empty_with_clear_waf_log_when_fallback_disabled(self):
+        portal = HuxiuPortal(self.SITE_CONFIG, {})
+        waf_html = "<title>Verification</title><meta name=\"aliyun_waf_aa\">"
+        with patch.object(portal, "_fetch_html_with_stealth", return_value=waf_html):
+            with self.assertLogs("src.sources.portals", level="WARNING") as logs:
+                items = portal.collect()
+
+        self.assertEqual([], items)
+        self.assertTrue(any("aliyun_waf" in line for line in logs.output))
 
 
 class FilterAndDedupTest(unittest.TestCase):

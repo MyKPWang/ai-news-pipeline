@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
@@ -76,11 +77,132 @@ class BasePortal:
 
 class HuxiuPortal(BasePortal):
     def collect(self) -> list[NewsItem]:
-        html = self.fetch_html(selector=".content-list__item, .ai-news-item-wrap")
-        return self.parse(html)
+        browser_config = self._browser_config()
+        mode = browser_config.get("mode", "stealth")
+        active_mode = mode
+
+        if mode == "chrome_persistent":
+            html = self._fetch_html_with_persistent_chrome(browser_config)
+        elif mode == "stealth":
+            html = self._fetch_html_with_stealth(browser_config)
+        else:
+            raise ValueError(f"Unsupported Huxiu browser mode: {mode}")
+
+        reason = self._response_issue(html)
+        if reason and browser_config.get("fallback_to_persistent_chrome", False) and mode != "chrome_persistent":
+            logger.warning(
+                "Huxiu %s response in %s mode; retrying with persistent Chrome",
+                reason,
+                mode,
+            )
+            html = self._fetch_html_with_persistent_chrome(browser_config)
+            reason = self._response_issue(html)
+            active_mode = "chrome_persistent"
+
+        if reason:
+            logger.warning("Huxiu collection returned %s in %s mode", reason, active_mode)
+            return []
+
+        items = self.parse(html)
+        if not items:
+            logger.warning("Huxiu collection parsed 0 items in %s mode", active_mode)
+        return items
+
+    def _browser_config(self) -> dict[str, Any]:
+        portal_browser = self.config.get("portal_browser", {})
+        huxiu_config = portal_browser.get("huxiu", {}) if isinstance(portal_browser, dict) else {}
+        return huxiu_config if isinstance(huxiu_config, dict) else {}
+
+    def _context_options(self, browser_config: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "viewport": {"width": 1920, "height": 1080},
+            "locale": browser_config.get("locale", "zh-CN"),
+            "timezone_id": browser_config.get("timezone_id", "Asia/Shanghai"),
+            "user_agent": browser_config.get(
+                "user_agent",
+                (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/140.0.0.0 Safari/537.36"
+                ),
+            ),
+            "extra_http_headers": {"Accept-Language": "zh-CN,zh;q=0.9"},
+        }
+
+    def _fetch_html_with_stealth(self, browser_config: dict[str, Any]) -> str:
+        from playwright.sync_api import sync_playwright
+        from playwright_stealth import Stealth
+
+        stealth = Stealth(
+            navigator_languages_override=("zh-CN", "zh"),
+            navigator_platform_override=browser_config.get("navigator_platform", "MacIntel"),
+        )
+        with stealth.use_sync(sync_playwright()) as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=["--disable-blink-features=AutomationControlled"],
+            )
+            try:
+                context = browser.new_context(**self._context_options(browser_config))
+                page = context.new_page()
+                response = page.goto(self.url, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(2500)
+                html = page.content()
+                logger.info(
+                    "Huxiu browser fetch mode=stealth status=%s title=%r chars=%s",
+                    response.status if response else None,
+                    page.title(),
+                    len(html),
+                )
+                return html
+            finally:
+                browser.close()
+
+    def _fetch_html_with_persistent_chrome(self, browser_config: dict[str, Any]) -> str:
+        from playwright.sync_api import sync_playwright
+
+        profile_dir = Path(browser_config.get("profile_dir", "data/browser_profiles/huxiu")).expanduser()
+        profile_dir.mkdir(parents=True, exist_ok=True)
+        with sync_playwright() as p:
+            context = p.chromium.launch_persistent_context(
+                str(profile_dir),
+                channel=browser_config.get("chrome_channel", "chrome"),
+                headless=False,
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                ],
+                **self._context_options(browser_config),
+            )
+            try:
+                page = context.pages[0] if context.pages else context.new_page()
+                response = page.goto(self.url, wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(2500)
+                html = page.content()
+                logger.info(
+                    "Huxiu browser fetch mode=chrome_persistent status=%s title=%r chars=%s",
+                    response.status if response else None,
+                    page.title(),
+                    len(html),
+                )
+                return html
+            finally:
+                context.close()
+
+    @staticmethod
+    def _response_issue(html: str) -> str | None:
+        if not html:
+            return "empty_response"
+        lowered = html.lower()
+        if "aliyun_waf" in lowered or "verification" in lowered or "滑动验证" in html:
+            return "aliyun_waf"
+        if "__NUXT_DATA__" not in html:
+            return "missing_nuxt_data"
+        return None
 
     def parse(self, html: str) -> list[NewsItem]:
-        if not html or "aliyun_waf" in html:
+        if self._response_issue(html):
             return []
         match = re.search(r'id="__NUXT_DATA__"[^>]*>([^<]+)<', html)
         if not match:

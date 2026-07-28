@@ -279,7 +279,7 @@ Body: username=<username>&password=<password>
 
 | 站点 | URL | 参考实现 | 采集字段 | 备注 |
 |------|-----|----------|----------|------|
-| 虎嗅 AI 资讯 | `https://www.huxiu.com/ainews/` | `ai-news-v11/scripts/sources/huxiu.py` | 标题、摘要、链接、发布时间 | Playwright 获取页面，从 `__NUXT_DATA__` 解析 |
+| 虎嗅 AI 资讯 | `https://www.huxiu.com/ainews/` | `ai-news-v11/scripts/sources/huxiu.py` | 标题、摘要、链接、发布时间 | 默认使用 playwright-stealth 获取页面，从 `__NUXT_DATA__` 解析；可选真实 Chrome 持久化 Profile |
 | 量子位资讯 | `https://www.qbitai.com/category/%E8%B5%84%E8%AE%AF` | `ai-news-v11/scripts/sources/qbitai.py` | 标题、摘要、链接、时间、作者 | 只保留作者为“量子位”的内容 |
 | AIBase 新闻 | `https://news.aibase.com/zh/news` | `ai-news-v11/scripts/sources/aibased.py` | 标题、摘要、链接、时间、热度 | Playwright 获取页面，BeautifulSoup 解析列表 |
 
@@ -291,6 +291,8 @@ Body: username=<username>&password=<password>
 - 一期默认不主动进入每篇详情页抓正文，降低成本和反爬风险；如果列表页或页面数据中已包含正文，可写入 `content`。
 - 抓取失败不应中断整个任务，应记录错误并继续处理其它来源。
 - Playwright browser 安装步骤必须写入 README，避免新机器 clone 后无法运行。
+- 虎嗅出现阿里云验证页时必须记录 `aliyun_waf` 诊断日志，不得静默返回空列表。
+- 虎嗅默认使用 `playwright-stealth` 的无头 Playwright；当部署机有桌面环境或 Xvfb 时，可配置真实 Chrome 与持久化 Profile 作为主模式或 fallback。
 - 门户网站采集结果必须统一转换为与微信公众号一致的 `NewsItem` 数据结构，并写入 SQLite。
 
 #### 3.6.3 门户网站配置格式
@@ -312,6 +314,13 @@ portal_sites:
     list_url: "https://news.aibase.com/zh/news"
     max_pages: 1
     fetch_detail: false
+
+portal_browser:
+  huxiu:
+    mode: "stealth"  # stealth | chrome_persistent
+    fallback_to_persistent_chrome: false
+    profile_dir: "data/browser_profiles/huxiu"
+    chrome_channel: "chrome"
 ```
 
 #### 3.6.4 字段映射
@@ -1148,6 +1157,7 @@ pyyaml
 jinja2
 beautifulsoup4
 playwright
+playwright-stealth
 numpy
 scikit-learn
 sentence-transformers  # BGE 模型

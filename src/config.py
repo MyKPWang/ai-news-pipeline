@@ -39,6 +39,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "fetch_detail": False,
         },
     ],
+    "portal_browser": {
+        "huxiu": {
+            "mode": "stealth",
+            "fallback_to_persistent_chrome": False,
+            "profile_dir": "data/browser_profiles/huxiu",
+            "chrome_channel": "chrome",
+            "locale": "zh-CN",
+            "timezone_id": "Asia/Shanghai",
+            "navigator_platform": "MacIntel",
+        },
+    },
     "minimax_api": {
         "model": "MiniMax-M2.7",
         "base_url": "https://api.minimax.chat/v1",

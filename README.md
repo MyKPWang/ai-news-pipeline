@@ -40,7 +40,7 @@ GET  /api/v1/wx/articles/{article_id}  # 可选，只有需要正文详情时使
 ## 功能范围
 
 - 从本机已部署的微信公众号资讯采集服务读取缓存文章。
-- 使用 Playwright 采集虎嗅、量子位、AIBase 列表页资讯。
+- 使用 Playwright 采集虎嗅、量子位、AIBase 列表页资讯；虎嗅默认启用 `playwright-stealth`，应对阿里云验证页。
 - 统一写入 SQLite。
 - 只保留最近 24 小时内资讯。
 - 基于 `ai-news-v11` 过滤词做规则过滤，并保留 AI 相关正向保护。
@@ -86,6 +86,29 @@ wechat_publish:
 ```
 
 MiniMax 模型默认使用 `MiniMax-M2.7`。
+
+### 虎嗅 Playwright 配置
+
+虎嗅会对普通无头 Chromium 返回阿里云验证页。项目默认使用 `playwright-stealth` 运行无头 Playwright；该模式不需要桌面环境，适合 OpenClaw 定时任务。
+
+```yaml
+portal_browser:
+  huxiu:
+    mode: "stealth"
+    fallback_to_persistent_chrome: false
+```
+
+当部署机安装了 Google Chrome，并且有可用桌面环境（或 Linux 上已配置 Xvfb）时，可以改为真实 Chrome 和持久化浏览器 Profile。该模式会保存 Cookie 与本地会话状态，Profile 目录不要提交 Git：
+
+```yaml
+portal_browser:
+  huxiu:
+    mode: "chrome_persistent"
+    profile_dir: "data/browser_profiles/huxiu"
+    chrome_channel: "chrome"
+```
+
+也可以保持 `mode: "stealth"`，并设置 `fallback_to_persistent_chrome: true`。此时只有 stealth 页面命中 WAF 或缺少 Nuxt 数据时，才尝试真实 Chrome。若部署机没有显示环境，不要开启该 fallback。
 
 ## 运行
 
@@ -230,6 +253,7 @@ python3 -m src.main
 ## 常见问题
 
 - Playwright 报找不到浏览器：执行 `python3 -m playwright install chromium`。
+- 虎嗅日志出现 `aliyun_waf`：默认 stealth 未通过验证页。确认 `playwright-stealth` 已随 `requirements.txt` 安装；若持续发生，可在有桌面环境的部署机启用 `chrome_persistent`，并使用 `python3 scripts/portal_smoke.py --strict` 验证。
 - Docker API 连接失败：确认电脑 A 上服务可通过 `http://localhost:4000` 访问。
 - LLM 失败：确认 `secrets.yaml` 中 `minimax_api.api_key` 已填写。
 - OpenClaw 在 LLM 阶段被 SIGKILL：优先确认使用最新代码；新版默认把 `rewrite_batch_size` 限制为 4，并在 BGE 后释放模型内存。`runtime.reuse_rewrite_cache: true` 时，重跑会复用上一轮已成功改写的条目，只继续处理未完成条目。如果仍被杀，可在 `config.yaml` 中临时设置 `bge_model.enabled: false`，或进一步降低 `minimax_api.rewrite_batch_size_cap`。

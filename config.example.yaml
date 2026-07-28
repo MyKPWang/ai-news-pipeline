@@ -43,6 +43,18 @@ portal_sites:
     max_pages: 1
     fetch_detail: false
 
+# 虎嗅会识别普通无头 Playwright。默认使用 playwright-stealth；
+# 如部署机有桌面环境或 Xvfb，可改为 chrome_persistent 使用真实 Chrome 和持久化 Cookie。
+portal_browser:
+  huxiu:
+    mode: "stealth"  # stealth | chrome_persistent
+    fallback_to_persistent_chrome: false
+    profile_dir: "data/browser_profiles/huxiu"
+    chrome_channel: "chrome"
+    locale: "zh-CN"
+    timezone_id: "Asia/Shanghai"
+    navigator_platform: "MacIntel"
+
 minimax_api:
   model: "MiniMax-M2.7"
   base_url: "https://api.minimax.chat/v1"
