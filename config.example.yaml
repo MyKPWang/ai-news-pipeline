@@ -1,59 +1,13 @@
 # Non-sensitive runtime configuration. Copy to config.yaml for local use.
 
-docker_api:
-  base_url: "http://localhost:4000"
-  page_size: 20
-  request_timeout_seconds: 20
-  fetch_article_detail: false
-
-wechat_accounts:
-  - name: "千问"
-    mp_id: ""
-  - name: "豆包"
-    mp_id: ""
-  - name: "DeepSeek"
-    mp_id: ""
-  - name: "华为"
-    mp_id: ""
-  - name: "小米技术"
-    mp_id: "MP_WXS_3510410326"
-  - name: "Apple开发者"
-    mp_id: "MP_WXS_3945721857"
-  - name: "量子位"
-    mp_id: ""
-  - name: "新智元"
-    mp_id: ""
-  - name: "机器之心"
-    mp_id: ""
-
-portal_sites:
-  - name: "huxiu"
-    enabled: true
-    list_url: "https://www.huxiu.com/ainews/"
-    max_pages: 1
-    fetch_detail: false
-  - name: "qbitai"
-    enabled: true
-    list_url: "https://www.qbitai.com/category/%E8%B5%84%E8%AE%AF"
-    max_pages: 1
-    fetch_detail: false
-  - name: "aibase"
-    enabled: true
-    list_url: "https://news.aibase.com/zh/news"
-    max_pages: 1
-    fetch_detail: false
-
-# 虎嗅会识别普通无头 Playwright。默认使用 playwright-stealth；
-# 如部署机有桌面环境或 Xvfb，可改为 chrome_persistent 使用真实 Chrome 和持久化 Cookie。
-portal_browser:
-  huxiu:
-    mode: "stealth"  # stealth | chrome_persistent
-    fallback_to_persistent_chrome: false
-    profile_dir: "data/browser_profiles/huxiu"
-    chrome_channel: "chrome"
-    locale: "zh-CN"
-    timezone_id: "Asia/Shanghai"
-    navigator_platform: "MacIntel"
+# The public-source collector owns website access, source-level retry/degradation,
+# and SQLite cache de-duplication. This Pipeline refreshes it then reads metadata.
+public_source_api:
+  base_url: "http://127.0.0.1:4100"
+  request_timeout_seconds: 180
+  page_size: 500
+  # Empty means all enabled sources. Fill this only for a deliberately scoped run.
+  source_slugs: []
 
 minimax_api:
   model: "MiniMax-M2.7"
@@ -72,14 +26,16 @@ minimax_api:
   max_content_chars: 2000
 
 bge_model:
-  path: ""
+  # Download once with: python3 scripts/bootstrap_bge_model.py (ModelScope by default)
+  path: "data/models/bge-small-zh-v1.5"
   name: "BAAI/bge-small-zh-v1.5"
+  allow_remote_download: false
   threshold: 0.85
   enabled: true
   force_gc_after_run: true
 
 runtime:
-  lookback_hours: 24
+  report_window: "previous_and_current_calendar_day"
   default_no_publish: false
   reuse_rewrite_cache: true
 

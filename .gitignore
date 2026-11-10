@@ -23,4 +23,9 @@ models/
 .latest_github_data.json
 .latest_review_run.json
 
+deploy/macos/local-machine.env
+
 .review_items_*.json
+
+# Local CodeGraph tooling data (machine-local)
+.codegraph/

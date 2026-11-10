@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>资讯日报控制台</title>
+  <link rel="icon" href="data:,">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="/console/static/console.css">
+</head>
+<body data-page="{{ page_name }}">
+  <header class="topbar"><a href="/console" class="brand-lockup"><span class="brand-mark">N</span><span>资讯日报控制台</span></a><div class="service-status"><span class="status-dot"></span><span id="serviceText">检查服务中</span></div></header>
+  <div class="shell"><aside class="sidebar"><p>工作台</p><a href="/console" data-nav="overview"><i data-lucide="layout-dashboard"></i>总览</a><a href="/console/reports" data-nav="reports"><i data-lucide="files"></i>日报中心</a><p>运营</p><a href="/console/sources" data-nav="sources"><i data-lucide="radio-tower"></i>来源与采集</a><a href="/console/operations" data-nav="operations"><i data-lucide="scroll-text"></i>运行与日志</a></aside>
+    <main id="pageContent" class="main"><div class="loading">正在加载控制台数据...</div></main>
+  </div>
+  <div id="toast" role="status"></div>
+  <dialog id="generateDialog"><form method="dialog"><header><h2>生成日报</h2><button class="icon-button" value="cancel" title="关闭"><i data-lucide="x"></i></button></header><p>请选择本次运行方式。两种方式都会从本地数据库筛选符合日报时间窗的资讯。</p><div class="choice-list"><button class="choice" type="button" data-action="report-refresh"><b>刷新来源后生成</b><span>依次刷新启用来源，遵守各来源限频；适合正常日常运行。</span></button><button class="choice" type="button" data-action="report-cache"><b>使用缓存重新生成</b><span>不请求任何网站，复用已采集资讯；适合 LLM 或排版阶段失败后的重试。</span></button></div></form></dialog>
+  <script src="/console/static/console.js"></script>
+</body>
+</html>

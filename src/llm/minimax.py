@@ -21,6 +21,13 @@ class LlmError(RuntimeError):
     pass
 
 
+class LlmResponseError(LlmError):
+    def __init__(self, reason_code: str, message: str, *, response_metadata: dict[str, Any] | None = None):
+        super().__init__(message)
+        self.reason_code = reason_code
+        self.response_metadata = response_metadata or {}
+
+
 class MiniMaxClient:
     def __init__(self, config: dict, storage: Storage, run_id: int):
         self.config = config
@@ -31,6 +38,7 @@ class MiniMaxClient:
         self.model = self.api_config.get("model", "MiniMax-M2.7")
         self.base_url = str(self.api_config.get("base_url", "https://api.minimax.chat/v1")).rstrip("/")
         self.llm_log_path = get_llm_log_path(config)
+        self._last_response_metadata: dict[str, Any] = {}
 
     def select_items(self, items: list[NewsItem]) -> tuple[list[NewsItem], dict[str, Any]]:
         if not items:
@@ -145,6 +153,7 @@ class MiniMaxClient:
         last_error = ""
         for attempt in range(int(self.api_config.get("max_retries", 3))):
             raw_response = ""
+            self._last_response_metadata = {}
             try:
                 logger.info(
                     "LLM call start task=%s attempt=%s items=%s prompt_chars=%s max_tokens=%s",
@@ -162,7 +171,7 @@ class MiniMaxClient:
                     attempt + 1,
                     len(raw_response),
                 )
-                self._write_llm_log(task, prompt_hash, payload, raw_response, parsed, "success")
+                self._write_llm_log(task, prompt_hash, payload, raw_response, parsed, "success", response_metadata=self._last_response_metadata)
                 self.storage.add_llm_call(
                     run_id=self.run_id,
                     task=task,
@@ -178,13 +187,26 @@ class MiniMaxClient:
                 return parsed
             except Exception as exc:
                 last_error = str(exc)
+                reason_code = exc.reason_code if isinstance(exc, LlmResponseError) else "LLM_CALL_FAILED"
+                response_metadata = exc.response_metadata if isinstance(exc, LlmResponseError) else self._last_response_metadata
                 logger.warning(
-                    "LLM call failed task=%s attempt=%s error=%s",
+                    "LLM call failed task=%s attempt=%s reason=%s error=%s",
                     task,
                     attempt + 1,
+                    reason_code,
                     last_error,
                 )
-                self._write_llm_log(task, prompt_hash, payload, raw_response, None, "failed", last_error)
+                self._write_llm_log(
+                    task,
+                    prompt_hash,
+                    payload,
+                    raw_response,
+                    None,
+                    "failed",
+                    last_error,
+                    response_metadata=response_metadata,
+                    reason_code=reason_code,
+                )
                 if attempt < int(self.api_config.get("max_retries", 3)) - 1:
                     time.sleep(2**attempt)
                 else:
@@ -218,11 +240,35 @@ class MiniMaxClient:
         )
         resp.raise_for_status()
         data = resp.json()
-        if data.get("choices"):
-            return data["choices"][0]["message"]["content"].strip()
-        if data.get("reply"):
-            return str(data["reply"]).strip()
-        raise LlmError(f"Unexpected MiniMax response: {data}")
+        choices = data.get("choices") if isinstance(data, dict) else None
+        first_choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+        self._last_response_metadata = {
+            "http_status": resp.status_code,
+            "request_id": resp.headers.get("x-request-id") or resp.headers.get("request-id") or "",
+            "choice_count": len(choices) if isinstance(choices, list) else 0,
+            "finish_reason": str(first_choice.get("finish_reason") or ""),
+            "response_keys": sorted(str(key) for key in data.keys()) if isinstance(data, dict) else [],
+        }
+        if first_choice:
+            message = first_choice.get("message") if isinstance(first_choice.get("message"), dict) else {}
+            content = str(message.get("content") or "").strip()
+            self._last_response_metadata["content_length"] = len(content)
+            if content:
+                return content
+            raise LlmResponseError(
+                "EMPTY_CHOICE_CONTENT",
+                "MiniMax returned an empty choice content",
+                response_metadata=self._last_response_metadata,
+            )
+        reply = str(data.get("reply") or "").strip() if isinstance(data, dict) else ""
+        self._last_response_metadata["content_length"] = len(reply)
+        if reply:
+            return reply
+        raise LlmResponseError(
+            "UNEXPECTED_RESPONSE_SHAPE",
+            "MiniMax response has no usable choice content",
+            response_metadata=self._last_response_metadata,
+        )
 
     def _write_llm_log(
         self,
@@ -233,6 +279,9 @@ class MiniMaxClient:
         parsed: dict[str, Any] | None,
         status: str,
         error: str = "",
+        *,
+        response_metadata: dict[str, Any] | None = None,
+        reason_code: str = "",
     ) -> None:
         record = {
             "created_at": utc_now_iso(),
@@ -245,6 +294,8 @@ class MiniMaxClient:
             "parsed": parsed,
             "status": status,
             "error": error,
+            "reason_code": reason_code,
+            "response_metadata": response_metadata or {},
         }
         path = Path(self.llm_log_path)
         path.parent.mkdir(parents=True, exist_ok=True)

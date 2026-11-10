@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -16,15 +17,16 @@ from .llm.minimax import LlmError, MiniMaxClient
 from .logging_utils import setup_logging
 from .models import NewsItem, PipelineResult
 from .publisher import publish_to_wechat_tool, render_wechat_html
-from .sources.portals import PortalSource
-from .sources.wechat import WechatApiSource
+from .sources.public_source_api import PublicSourceApiError, PublicSourceApiSource
+from .sources.wechat_read_api import WechatReadApiSource
 from .storage import Storage
 from .time_utils import format_time_text, parse_publish_time
 
 logger = logging.getLogger(__name__)
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
-def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
+def run_pipeline(config: dict, no_publish: bool = False, *, refresh_sources: bool = True) -> PipelineResult:
     storage = Storage(config.get("output", {}).get("database_path", "data/news.db"))
     run_date = datetime.now().strftime("%Y%m%d")
     run_id = storage.start_run(run_date)
@@ -36,7 +38,13 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
     published = False
 
     try:
-        raw_items = collect_all_sources(config, storage, run_id)
+        # Preserve the established default call shape for CLI callers and test
+        # adapters. The explicit branch is only needed for console cache retries.
+        raw_items = (
+            collect_all_sources(config, storage, run_id)
+            if refresh_sources
+            else collect_all_sources(config, storage, run_id, refresh_sources=False)
+        )
         raw_id_map = storage.insert_raw_items(run_id, raw_items)
         _log(storage, run_id, "info", "pipeline", "collected", f"raw_items={len(raw_items)}")
         _log(storage, run_id, "info", "pipeline", "inserted", f"raw_items={len(raw_id_map)} diff_collected_vs_inserted={len(raw_items) - len(raw_id_map)}")
@@ -46,7 +54,7 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         for item in review_time:
             storage.add_filter_event(
                 run_id, "time_filter", "time_filtered", item, raw_id_map.get(item.id),
-                "time_unparsed_or_out_of_range", "无法解析时间或不在24小时窗口内"
+                "time_unparsed_or_out_of_range", "无法解析时间或不在昨日至今日日历窗口内"
             )
         _log(storage, run_id, "info", "pipeline", "time_filter", f"kept={len(candidates)} time_filtered={len(review_time)}")
 
@@ -215,16 +223,38 @@ def run_pipeline(config: dict, no_publish: bool = False) -> PipelineResult:
         raise
 
 
-def collect_all_sources(config: dict, storage: Storage, run_id: int) -> list[NewsItem]:
+def collect_all_sources(config: dict, storage: Storage, run_id: int, *, refresh_sources: bool = True) -> list[NewsItem]:
     items: list[NewsItem] = []
-    for source in (WechatApiSource(config), PortalSource(config)):
+    source = PublicSourceApiSource(config)
+    try:
+        collected = source.collect(refresh=refresh_sources)
+        items.extend(collected)
+        mode = "refreshed" if refresh_sources else "cache_only"
+        _log(storage, run_id, "info", "source", source.name, f"count={len(collected)} mode={mode}")
+    except PublicSourceApiError as exc:
+        _log(storage, run_id, "error", "source", source.name, str(exc))
+        # The collector is the only ingestion boundary. Do not publish a report from
+        # an unknown or stale cache when its refresh/read contract has failed.
+        raise
+    except Exception as exc:
+        _log(storage, run_id, "error", "source", source.name, str(exc))
+        raise PublicSourceApiError(f"unexpected collector client failure: {exc}") from exc
+
+    # WeChat official-account articles are read from the same collector, but they
+    # live in a separate table (articles) fed by the WeRead channel. A failure
+    # here degrades the report to public sources only; it must not abort the
+    # public-source path that already succeeded above.
+    wechat_config = config.get("wechat_read_api") or {}
+    if wechat_config.get("enabled"):
+        wechat_source = WechatReadApiSource(config)
         try:
-            collected = source.collect()
-            items.extend(collected)
-            _log(storage, run_id, "info", "source", source.name, f"count={len(collected)}")
+            wechat_items = wechat_source.collect()
         except Exception as exc:
-            _log(storage, run_id, "error", "source", source.name, str(exc))
-            logger.warning("Source failed: %s %s", source.name, exc)
+            _log(storage, run_id, "error", "source", wechat_source.name, str(exc))
+            logger.warning("WeChat collector read failed, continuing with public sources only: %s", exc)
+        else:
+            items.extend(wechat_items)
+            _log(storage, run_id, "info", "source", wechat_source.name, f"count={len(wechat_items)}")
     return items
 
 
@@ -239,9 +269,18 @@ def sort_by_source_priority(items: list[NewsItem]) -> list[NewsItem]:
     )
 
 
-def filter_recent(items: list[NewsItem], config: dict) -> tuple[list[NewsItem], list[NewsItem]]:
-    lookback = int(config.get("runtime", {}).get("lookback_hours", 24))
-    threshold = datetime.now() - timedelta(hours=lookback)
+def filter_recent(
+    items: list[NewsItem], config: dict, now: datetime | None = None
+) -> tuple[list[NewsItem], list[NewsItem]]:
+    """Keep yesterday and today by Asia/Shanghai calendar day.
+
+    The collector query already uses this window. Keeping the same defensive check
+    here avoids a malformed upstream record slipping into the daily report.
+    """
+    local_now = (now or datetime.now(SHANGHAI)).astimezone(SHANGHAI)
+    today = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+    window_start = today - timedelta(days=1)
+    window_end = today + timedelta(days=1)
     kept: list[NewsItem] = []
     review: list[NewsItem] = []
     for item in items:
@@ -254,9 +293,10 @@ def filter_recent(items: list[NewsItem], config: dict) -> tuple[list[NewsItem], 
             review.append(item)
             item.risk_flags.append("time_unparsed")
             continue
-        if datetime.fromtimestamp(parsed) < threshold:
+        published_at = datetime.fromtimestamp(parsed, tz=window_start.tzinfo)
+        if not window_start <= published_at < window_end:
             review.append(item)
-            item.risk_flags.append("out_of_lookback")
+            item.risk_flags.append("out_of_report_window")
             continue
         kept.append(item)
     return kept, review

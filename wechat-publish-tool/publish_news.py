@@ -4,6 +4,7 @@ publish_news - 通用微信公众号HTML生成与上传工具
 接收预处理好的数据，生成HTML并上传到微信公众号草稿箱
 """
 import json
+import re
 import time
 from pathlib import Path
 from datetime import datetime
@@ -132,6 +133,25 @@ def save_html(html_content: str, title: str) -> str:
     return str(filepath)
 
 
+# 微信短链字符集是 [A-Za-z0-9_-]，不含 "~"。微信读书 reviewId 里的 "~" 一旦
+# 原样进到草稿正文，draft/add 会整篇拒绝（errcode 64550），不是降级处理。
+# 详见 references/wechat-mp-publish-contract.md。
+_MP_SHORT_LINK_RE = re.compile(r"(https?://mp\.weixin\.qq\.com/s/[A-Za-z0-9_~\-]+)")
+
+# 与该公众号历史草稿一致的封面裁剪（2.35:1 主封面 + 1:1 方形缩略图）。
+# 不传 cover_info 时微信会按自己的规则裁剪，和历史文章对不上。
+COVER_CROP_PERCENT_LIST = [
+    {"ratio": "2.35_1", "x1": "0.00631784927", "y1": "0", "x2": "0.993682146", "y2": "1"},
+    {"ratio": "1_1", "x1": "0.289922476", "y1": "0", "x2": "0.710077524", "y2": "1"},
+]
+
+
+def normalize_wechat_links(html: str) -> tuple[str, int]:
+    """把微信短链里的 "~" 规范化为 "_"。返回 (html, 修正数)。"""
+    fixed, n = _MP_SHORT_LINK_RE.subn(lambda m: m.group(1).replace("~", "_"), html)
+    return fixed, n
+
+
 def upload_to_wechat(html_content: str, title: str, thumb_media_id: str, config: dict, author: str = None) -> bool:
     """上传到微信公众号草稿箱"""
     import requests
@@ -149,14 +169,23 @@ def upload_to_wechat(html_content: str, title: str, thumb_media_id: str, config:
         print(f"   ❌ 获取 access_token 失败")
         return False
 
+    # 规范化微信短链，避免整篇被拒
+    html_content, fixed_links = normalize_wechat_links(html_content)
+    if fixed_links:
+        print(f"   🔧 已规范化 {fixed_links} 条微信短链（~ → _）")
+
     # 构造草稿
     draft = {
         "articles": [{
+            "article_type": "news",
             "title": title,
             "author": author or "Valkyrie",
             "digest": f"{title} | 今日移动端AI资讯速览",
             "content": html_content,
             "thumb_media_id": thumb_media_id,
+            "need_open_comment": 0,
+            "only_fans_can_comment": 0,
+            "cover_info": {"crop_percent_list": COVER_CROP_PERCENT_LIST},
         }]
     }
 
@@ -167,6 +196,7 @@ def upload_to_wechat(html_content: str, title: str, thumb_media_id: str, config:
 
     if "media_id" in result:
         print(f"   ✅ 已上传到公众号草稿箱")
+        print(f"   media_id: {result['media_id']}")
         return True
     else:
         print(f"   ❌ 上传失败: {result}")

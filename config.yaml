@@ -1,61 +1,19 @@
 # Non-sensitive runtime configuration. Copy to config.yaml for local use.
 
-docker_api:
-  base_url: "http://localhost:4000"
-  page_size: 20
-  request_timeout_seconds: 20
-  fetch_article_detail: false
+public_source_api:
+  base_url: "http://127.0.0.1:4100"
+  # The collector refresh crawls every public endpoint (13 of them, Playwright
+  # included). Observed runs take 180-220s, so a 180s timeout aborted the read
+  # while the refresh was still succeeding server-side.
+  request_timeout_seconds: 420
+  page_size: 500
+  source_slugs: []
 
-wechat_accounts:
-  - name: "千问APP"
-    mp_id: "MP_WXS_3634190101"
-  - name: "豆包"
-    mp_id: "MP_WXS_3931663331"
-  - name: "DeepSeek"
-    mp_id: "MP_WXS_3554086560"
-  - name: "华为"
-    mp_id: "MP_WXS_2398264963"
-  - name: "小米技术"
-    mp_id: "MP_WXS_3510410326"
-  - name: "Apple开发者"
-    mp_id: "MP_WXS_3945721857"
-  - name: "量子位"
-    mp_id: "MP_WXS_3236757533"
-  - name: "新智元"
-    mp_id: "MP_WXS_3271041950"
-  - name: "机器之心"
-    mp_id: "MP_WXS_3073282833"
-  - name: "字节跳动技术团队"
-    mp_id: "MP_WXS_3253632141"
-  - name: "千问大模型"
-    mp_id: "MP_WXS_3948884294"
-  - name: "HarmonyOS开发者技术"
-    mp_id: "MP_WXS_3904143447"
-  - name: "通义实验室"
-    mp_id: "MP_WXS_3911621034"
-  - name: "APPSO"
-    mp_id: "MP_WXS_2392024520"
-  - name: "AI前线"
-    mp_id: "MP_WXS_3554086560"
-  - name: "智东西"
-    mp_id: "MP_WXS_3081486433"
-
-portal_sites:
-  - name: "huxiu"
-    enabled: true
-    list_url: "https://www.huxiu.com/ainews/"
-    max_pages: 1
-    fetch_detail: false
-  - name: "qbitai"
-    enabled: true
-    list_url: "https://www.qbitai.com/category/%E8%B5%84%E8%AE%AF"
-    max_pages: 1
-    fetch_detail: false
-  - name: "aibase"
-    enabled: true
-    list_url: "https://news.aibase.com/zh/news"
-    max_pages: 1
-    fetch_detail: false
+wechat_read_api:
+  enabled: true
+  base_url: "http://127.0.0.1:4100"
+  request_timeout_seconds: 60
+  page_size: 200
 
 minimax_api:
   model: "MiniMax-M2.7"
@@ -74,19 +32,21 @@ minimax_api:
   max_content_chars: 2000
 
 bge_model:
-  path: ""
+  path: "data/models/bge-small-zh-v1.5"
   name: "BAAI/bge-small-zh-v1.5"
+  allow_remote_download: false
   threshold: 0.85
   enabled: true
   force_gc_after_run: true
 
 runtime:
-  lookback_hours: 24
+  # Daily report window: yesterday 00:00 through tomorrow 00:00, Asia/Shanghai.
+  report_window: "previous_and_current_calendar_day"
   default_no_publish: false
   reuse_rewrite_cache: true
 
 wechat_publish:
-  thumb_media_id: ""
+  thumb_media_id: "OBa7s7v5pJj8C3xsRSuJHCEQh-fegLrmZO3jteVu4mfr3-OUP7ncJS5hw8Otzk2f"
   auto_publish: true
   author: "Valkyrie"
 

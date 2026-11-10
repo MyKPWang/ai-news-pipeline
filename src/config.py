@@ -9,46 +9,19 @@ import yaml
 
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "docker_api": {
-        "base_url": "http://localhost:4000",
-        "page_size": 20,
-        "request_timeout_seconds": 20,
-        "fetch_article_detail": False,
+    "public_source_api": {
+        "base_url": "http://127.0.0.1:4100",
+        "token": "",
+        "request_timeout_seconds": 180,
+        "page_size": 500,
+        "source_slugs": [],
     },
-    "wechat_accounts": [],
-    "portal_sites": [
-        {
-            "name": "huxiu",
-            "enabled": True,
-            "list_url": "https://www.huxiu.com/ainews/",
-            "max_pages": 1,
-            "fetch_detail": False,
-        },
-        {
-            "name": "qbitai",
-            "enabled": True,
-            "list_url": "https://www.qbitai.com/category/%E8%B5%84%E8%AE%AF",
-            "max_pages": 1,
-            "fetch_detail": False,
-        },
-        {
-            "name": "aibase",
-            "enabled": True,
-            "list_url": "https://news.aibase.com/zh/news",
-            "max_pages": 1,
-            "fetch_detail": False,
-        },
-    ],
-    "portal_browser": {
-        "huxiu": {
-            "mode": "stealth",
-            "fallback_to_persistent_chrome": False,
-            "profile_dir": "data/browser_profiles/huxiu",
-            "chrome_channel": "chrome",
-            "locale": "zh-CN",
-            "timezone_id": "Asia/Shanghai",
-            "navigator_platform": "MacIntel",
-        },
+    "wechat_read_api": {
+        "enabled": True,
+        "base_url": "http://127.0.0.1:4100",
+        "token": "",
+        "request_timeout_seconds": 60,
+        "page_size": 200,
     },
     "minimax_api": {
         "model": "MiniMax-M2.7",
@@ -74,7 +47,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "force_gc_after_run": True,
     },
     "runtime": {
-        "lookback_hours": 24,
+        "report_window": "previous_and_current_calendar_day",
         "default_no_publish": False,
         "reuse_rewrite_cache": True,
     },
@@ -136,9 +109,10 @@ def _apply_env_overrides(config: dict[str, Any]) -> None:
     env_map = {
         "MINIMAX_API_KEY": ("minimax_api", "api_key"),
         "MINIMAX_MODEL": ("minimax_api", "model"),
-        "WECHAT_DOCKER_API_BASE_URL": ("docker_api", "base_url"),
-        "WECHAT_DOCKER_API_USERNAME": ("docker_api", "username"),
-        "WECHAT_DOCKER_API_PASSWORD": ("docker_api", "password"),
+        "PUBLIC_SOURCE_API_BASE_URL": ("public_source_api", "base_url"),
+        "PUBLIC_SOURCE_API_TOKEN": ("public_source_api", "token"),
+        "WECHAT_READ_API_BASE_URL": ("wechat_read_api", "base_url"),
+        "WECHAT_READ_API_TOKEN": ("wechat_read_api", "token"),
         "WECHAT_APP_ID": ("wechat_publish", "app_id"),
         "WECHAT_APP_SECRET": ("wechat_publish", "app_secret"),
     }
