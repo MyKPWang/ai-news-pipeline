@@ -8,10 +8,14 @@ object plus `media_id` and `index`).
 
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from src.wechat_draft import (
+    DraftResult,
     WeChatApiError,
     WeChatIpNotWhitelistedError,
     add_draft,
@@ -258,6 +262,14 @@ class WeChatDraftTests(unittest.TestCase):
 
 
 class PublisherResilienceTests(unittest.TestCase):
+    def setUp(self):
+        # The publisher writes the WeChat credentials into the tool directory.
+        # Never let a test touch the production news-config.json.
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tool_dir = Path(self._tmp.name) / "wechat-publish-tool"
+        self.tool_dir.mkdir()
+        self.addCleanup(self._tmp.cleanup)
+
     def test_publish_failure_does_not_raise(self):
         from src import publisher
 
@@ -265,7 +277,7 @@ class PublisherResilienceTests(unittest.TestCase):
             module = load.return_value
             module.generate_html.side_effect = RuntimeError("boom")
             with self.assertLogs("src.publisher", level="ERROR"):
-                result = publisher.publish_to_wechat_tool({}, "title", [], {})
+                result = publisher.publish_to_wechat_tool({}, "title", [], {}, tool_dir=self.tool_dir)
         self.assertFalse(result)
 
     def test_whitelist_error_logs_the_ip_to_whitelist(self):
@@ -290,11 +302,50 @@ class PublisherResilienceTests(unittest.TestCase):
                         "title",
                         [],
                         {"wechat_publish": {"app_id": "a", "app_secret": "b"}},
+                        tool_dir=self.tool_dir,
                     )
         self.assertFalse(result)
         message = "\n".join(captured.output)
         self.assertIn("220.196.12.5", message)
         self.assertIn("IP白名单", message)
+
+    def test_publish_writes_credentials_into_the_given_tool_dir_only(self):
+        """Regression: a publish call must not write the production config.
+
+        The tool directory used to be resolved from the current working
+        directory, so running the publisher from the repository root overwrote
+        wechat-publish-tool/news-config.json -- the live WeChat credentials --
+        with whatever the caller passed in. The publisher now resolves the
+        tool directory from the package location and honours an explicit
+        override.
+        """
+        from src import publisher
+
+        production_config = publisher.DEFAULT_TOOL_DIR / "news-config.json"
+        before = production_config.read_bytes() if production_config.exists() else None
+
+        with patch.object(publisher, "_load_publish_module") as load:
+            module = load.return_value
+            module.generate_html.return_value = "<p>x</p>"
+            module.save_html.return_value = "saved"
+            module.normalize_wechat_links.return_value = ("<p>x</p>", 0)
+            module.get_config.return_value = {"app_id": "a", "app_secret": "b"}
+            module.ensure_thumb_media_id.return_value = "THUMB"
+            with patch.object(publisher, "upsert_draft", return_value=DraftResult(
+                media_id="m", action="created", title="title"
+            )):
+                publisher.publish_to_wechat_tool(
+                    {},
+                    "title",
+                    [],
+                    {"wechat_publish": {"app_id": "a", "app_secret": "b"}},
+                    tool_dir=self.tool_dir,
+                )
+
+        after = production_config.read_bytes() if production_config.exists() else None
+        self.assertEqual(before, after, "the production news-config.json was modified")
+        written = json.loads((self.tool_dir / "news-config.json").read_text(encoding="utf-8"))
+        self.assertEqual("a", written["app_id"])
 
 
 if __name__ == "__main__":

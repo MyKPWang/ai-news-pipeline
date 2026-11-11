@@ -13,13 +13,20 @@ from .wechat_draft import (
 
 logger = logging.getLogger(__name__)
 
+# The publish tool lives next to the package, not in the current working
+# directory. Resolving it from the package location keeps the publisher
+# independent of where the process was started, and -- more importantly -- keeps
+# a caller (a test, an ad-hoc script) from writing its credentials into the
+# production wechat-publish-tool/news-config.json by accident.
+DEFAULT_TOOL_DIR = Path(__file__).resolve().parent.parent / "wechat-publish-tool"
+
 
 def render_wechat_html(
     data: dict,
     title: str,
     sources: list[str],
     config: dict,
-    tool_dir: str | Path = "wechat-publish-tool",
+    tool_dir: str | Path = DEFAULT_TOOL_DIR,
 ) -> str:
     module = _load_publish_module(Path(tool_dir))
     author = config.get("wechat_publish", {}).get("author", "Valkyrie")
@@ -39,6 +46,7 @@ def publish_to_wechat_tool(
     title: str,
     sources: list[str],
     config: dict,
+    tool_dir: str | Path = DEFAULT_TOOL_DIR,
 ) -> bool:
     """Publish the report to the WeChat draft box.
 
@@ -48,8 +56,12 @@ def publish_to_wechat_tool(
 
     A publish failure never propagates. The rendered HTML is already on disk,
     so the content is not lost and only the upload has to be retried.
+
+    ``tool_dir`` defaults to the publish tool that ships next to this package.
+    Pass an explicit path to write the credentials somewhere else -- a test
+    must never overwrite the production ``news-config.json``.
     """
-    tool_dir = Path("wechat-publish-tool")
+    tool_dir = Path(tool_dir)
     try:
         module = _load_publish_module(tool_dir)
         _write_tool_config(tool_dir, config)
