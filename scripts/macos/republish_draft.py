@@ -38,10 +38,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import yaml
+
 PIPELINE_HOME = Path(__file__).resolve().parents[2]
 TOOL_DIR = PIPELINE_HOME / "wechat-publish-tool"
 OUTPUT_DIR = TOOL_DIR / "output"
 CONFIG_PATH = TOOL_DIR / "news-config.json"
+SECRETS_PATH = PIPELINE_HOME / "secrets.yaml"
+PIPELINE_CONFIG_PATH = PIPELINE_HOME / "config.yaml"
 PUBLISH_MODULE_PATH = TOOL_DIR / "publish_news.py"
 
 TITLE_RE = re.compile(r"移动端AI资讯速览\s*\|\s*(\d{4}-\d{2}-\d{2})")
@@ -58,9 +62,45 @@ def _load_publish_module():
 
 
 def load_config() -> dict:
-    if not CONFIG_PATH.exists():
-        raise SystemExit(f"missing publish config: {CONFIG_PATH}")
-    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    """Resolve the AppID, AppSecret and thumb media id.
+
+    ``secrets.yaml`` holds the credentials and ``config.yaml`` the standing
+    cover; both are the sources of truth. ``news-config.json`` is only a
+    runtime copy the publisher writes, so it is used as a fallback for the
+    thumb media id when the pipeline has not run yet.
+    """
+    app_id = app_secret = None
+    if SECRETS_PATH.exists():
+        secrets = yaml.safe_load(SECRETS_PATH.read_text(encoding="utf-8")) or {}
+        publish = secrets.get("wechat_publish") or {}
+        app_id = publish.get("app_id")
+        app_secret = publish.get("app_secret")
+
+    thumb_media_id = None
+    if PIPELINE_CONFIG_PATH.exists():
+        pipeline_config = yaml.safe_load(PIPELINE_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+        thumb_media_id = (pipeline_config.get("wechat_publish") or {}).get("thumb_media_id")
+
+    if not app_id or not app_secret:
+        if not CONFIG_PATH.exists():
+            raise SystemExit(f"missing publish config: {SECRETS_PATH}")
+        current = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        app_id = app_id or current.get("app_id")
+        app_secret = app_secret or current.get("app_secret")
+        thumb_media_id = thumb_media_id or current.get("thumb_media_id")
+
+    if not app_id or not app_secret:
+        raise SystemExit(f"no app_id/app_secret in {SECRETS_PATH}")
+    if not thumb_media_id:
+        raise SystemExit(
+            "no thumb_media_id; run the full pipeline once first "
+            f"({PIPELINE_CONFIG_PATH} or {CONFIG_PATH})"
+        )
+    return {
+        "app_id": app_id,
+        "app_secret": app_secret,
+        "thumb_media_id": thumb_media_id,
+    }
 
 
 def find_html(date: str | None) -> Path:
