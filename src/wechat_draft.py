@@ -21,6 +21,7 @@ Two properties matter operationally:
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
@@ -28,6 +29,13 @@ from typing import Any, Iterable, Mapping, Sequence
 import requests
 
 API_BASE = "https://api.weixin.qq.com/cgi-bin"
+
+# The official API answers several endpoints with `Content-Type: text/plain`
+# and no charset. `requests` then falls back to ISO-8859-1 and every Chinese
+# character comes back as mojibake, which silently breaks the exact-title
+# lookup that keeps the upload idempotent. Payloads are therefore decoded
+# from the raw bytes as UTF-8.
+_JSON_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 
 # The WeChat error text looks like:
 #   invalid ip 220.196.12.5 ipv6 ::ffff:220.196.12.5, not in whitelist rid: ...
@@ -95,6 +103,52 @@ def _raise_for_error(payload: Mapping[str, Any], what: str) -> None:
     )
 
 
+def _decode_json(resp: Any) -> dict:
+    """Decode a WeChat JSON response as UTF-8.
+
+    ``draft/batchget`` and ``draft/get`` answer with ``Content-Type:
+    text/plain`` and no charset, so ``requests`` decodes the body as
+    ISO-8859-1. Every Chinese character then arrives as mojibake and the
+    exact-title lookup silently fails. Decoding the raw bytes as UTF-8 is
+    the only reliable way to read these payloads.
+    """
+    content = getattr(resp, "content", None)
+    if isinstance(content, (bytes, bytearray)):
+        return json.loads(bytes(content).decode("utf-8"))
+    return resp.json()
+
+
+def _encode_json(payload: Any) -> bytes:
+    """Serialize a request body as UTF-8 JSON.
+
+    ``requests``' ``json=`` parameter uses ``ensure_ascii=True``, which turns
+    every Chinese character into a literal ``\\uXXXX`` escape. WeChat stores
+    those escapes verbatim, so the draft title ends up in the box as
+    ``\\u79fb\\u52a8...`` and the body loses every Chinese character.
+    Sending real UTF-8 bytes with an explicit charset keeps the text intact.
+    """
+    return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+def _post_json(
+    http: Any,
+    url: str,
+    payload: Any,
+    *,
+    timeout: int,
+    params: Mapping[str, str] | None = None,
+) -> dict:
+    """POST a JSON body as UTF-8 bytes and decode the answer as UTF-8."""
+    resp = http.post(
+        url,
+        params=params,
+        data=_encode_json(payload),
+        headers=_JSON_HEADERS,
+        timeout=timeout,
+    )
+    return _decode_json(resp)
+
+
 def fetch_access_token(
     app_id: str,
     app_secret: str,
@@ -117,7 +171,7 @@ def fetch_access_token(
         },
         timeout=timeout,
     )
-    payload = resp.json()
+    payload = _decode_json(resp)
     token = payload.get("access_token")
     if not token:
         _raise_for_error(payload, "access_token request")
@@ -146,13 +200,13 @@ def list_drafts(
     offset = 0
     total: int | None = None
     while True:
-        resp = http.post(
+        payload = _post_json(
+            http,
             f"{API_BASE}/draft/batchget",
-            params={"access_token": token},
-            json={"offset": offset, "count": page_size, "no_content": 0},
+            {"offset": offset, "count": page_size, "no_content": 0},
             timeout=timeout,
+            params={"access_token": token},
         )
-        payload = resp.json()
         _raise_for_error(payload, "draft/batchget")
         page = list(payload.get("item") or [])
         if total is None:
@@ -227,13 +281,13 @@ def add_draft(
 ) -> str:
     """Create a new draft and return its media_id."""
     http = session or requests
-    resp = http.post(
+    payload = _post_json(
+        http,
         f"{API_BASE}/draft/add",
-        params={"access_token": token},
-        json={"articles": [dict(article)]},
+        {"articles": [dict(article)]},
         timeout=timeout,
+        params={"access_token": token},
     )
-    payload = resp.json()
     _raise_for_error(payload, "draft/add")
     media_id = payload.get("media_id")
     if not media_id:
@@ -252,17 +306,17 @@ def update_draft(
 ) -> str:
     """Replace one article of an existing draft and return its media_id."""
     http = session or requests
-    resp = http.post(
+    payload = _post_json(
+        http,
         f"{API_BASE}/draft/update",
-        params={"access_token": token},
-        json={
+        {
             "media_id": media_id,
             "index": index,
             "articles": dict(article),
         },
         timeout=timeout,
+        params={"access_token": token},
     )
-    payload = resp.json()
     _raise_for_error(payload, "draft/update")
     return str(media_id)
 

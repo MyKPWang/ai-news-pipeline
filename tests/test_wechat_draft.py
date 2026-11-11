@@ -35,6 +35,24 @@ class FakeResponse:
         return self._payload
 
 
+class Utf8Response:
+    """A response whose raw bytes are UTF-8 but whose header says text/plain.
+
+    The official API answers `draft/batchget` and `draft/get` this way, and
+    `requests` would decode the body as ISO-8859-1. The client has to decode
+    the raw bytes itself.
+    """
+
+    def __init__(self, payload):
+        self.content = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.headers = {"Content-Type": "text/plain"}
+
+    def json(self):
+        # Deliberately wrong: mirrors what requests would do with this
+        # header, i.e. decode the bytes as ISO-8859-1.
+        return json.loads(self.content.decode("iso-8859-1"))
+
+
 class FakeSession:
     """Records every request and replays queued responses."""
 
@@ -46,7 +64,10 @@ class FakeSession:
         self.calls.append((method, url, kwargs))
         if not self.responses:
             raise AssertionError(f"unexpected {method} {url}")
-        return FakeResponse(self.responses.pop(0))
+        response = self.responses.pop(0)
+        if isinstance(response, dict):
+            return FakeResponse(response)
+        return response
 
     def get(self, url, **kwargs):
         return self._next("GET", url, kwargs)
@@ -56,6 +77,10 @@ class FakeSession:
 
     def urls(self):
         return [url for _, url, _ in self.calls]
+
+    def bodies(self):
+        """The decoded JSON body of every recorded POST."""
+        return [json.loads(kwargs["data"].decode("utf-8")) for _, _, kwargs in self.calls if "data" in kwargs]
 
 
 class WeChatDraftTests(unittest.TestCase):
@@ -105,8 +130,8 @@ class WeChatDraftTests(unittest.TestCase):
         drafts = list_drafts("TOKEN", session=session)
         self.assertEqual(3, len(drafts))
         self.assertEqual(2, len(session.calls))
-        self.assertEqual(0, session.calls[0][2]["json"]["offset"])
-        self.assertEqual(2, session.calls[1][2]["json"]["offset"])
+        self.assertEqual(0, session.bodies()[0]["offset"])
+        self.assertEqual(2, session.bodies()[1]["offset"])
 
     def test_find_draft_by_title_matches_and_reports_index(self):
         session = FakeSession(
@@ -144,8 +169,9 @@ class WeChatDraftTests(unittest.TestCase):
         self.assertEqual("NEW", media_id)
         url, kwargs = session.calls[0][1], session.calls[0][2]
         self.assertIn("/draft/add", url)
-        self.assertIsInstance(kwargs["json"]["articles"], list)
-        self.assertEqual(1, len(kwargs["json"]["articles"]))
+        body = session.bodies()[-1]
+        self.assertIsInstance(body["articles"], list)
+        self.assertEqual(1, len(body["articles"]))
 
     def test_update_draft_sends_a_single_article_object(self):
         session = FakeSession([{"errcode": 0, "errmsg": "ok"}])
@@ -153,7 +179,7 @@ class WeChatDraftTests(unittest.TestCase):
         self.assertEqual("m1", media_id)
         url, kwargs = session.calls[0][1], session.calls[0][2]
         self.assertIn("/draft/update", url)
-        body = kwargs["json"]
+        body = session.bodies()[-1]
         self.assertEqual("m1", body["media_id"])
         self.assertEqual(0, body["index"])
         self.assertIsInstance(body["articles"], dict)
@@ -238,6 +264,100 @@ class WeChatDraftTests(unittest.TestCase):
             self.assertEqual("updated", result.action)
         self.assertNotIn("/draft/add", " ".join(session.urls()))
 
+
+    def test_batchget_decodes_utf8_despite_text_plain_header(self):
+        """Regression: the API answers with `Content-Type: text/plain`.
+
+        `requests` would decode the body as ISO-8859-1 and the Chinese
+        titles would come back as mojibake, so the exact-title lookup would
+        never match and every upload would create a duplicate.
+        """
+        title = "移动端AI资讯速览 | 2026-11-11"
+        session = FakeSession(
+            [
+                Utf8Response(
+                    {
+                        "total_count": 1,
+                        "item": [
+                            {
+                                "media_id": "m1",
+                                "content": {"news_item": [{"title": title}]},
+                            }
+                        ],
+                    }
+                )
+            ]
+        )
+        found = find_draft_by_title("TOKEN", title, session=session)
+        self.assertIsNotNone(found, "the UTF-8 title was not matched")
+        self.assertEqual("m1", found["media_id"])
+
+    def test_request_body_carries_real_chinese_not_unicode_escapes(self):
+        r"""Regression: `requests`' `json=` escapes non-ASCII as `\uXXXX`.
+
+        WeChat stores those escape sequences verbatim, so the draft title
+        would show up as a literal `\u79fb\u52a8...` and the body would
+        lose every Chinese character.
+        """
+        title = "移动端AI资讯速览 | 2026-11-11"
+        session = FakeSession([{"media_id": "NEW"}])
+        add_draft("TOKEN", {"title": title, "content": "<p>今日热点</p>"}, session=session)
+        raw = session.calls[0][2]["data"]
+        self.assertIsInstance(raw, bytes)
+        self.assertIn(title.encode("utf-8"), raw)
+        self.assertNotIn(b"\u79fb", raw)
+        self.assertIn("charset=utf-8", session.calls[0][2]["headers"]["Content-Type"])
+
+    def test_upsert_is_idempotent_over_the_real_wire_format(self):
+        """Two consecutive uploads must update, never add twice.
+
+        The first run finds no draft and creates one; the second run reads
+        the draft back over the text/plain wire format and updates it.
+        """
+        title = "移动端AI资讯速览 | 2026-11-11"
+        session = FakeSession(
+            [
+                {"access_token": "TOKEN"},
+                Utf8Response({"total_count": 0, "item": []}),
+                {"media_id": "M1"},
+                {"access_token": "TOKEN"},
+                Utf8Response(
+                    {
+                        "total_count": 1,
+                        "item": [
+                            {
+                                "media_id": "M1",
+                                "content": {"news_item": [{"title": title}]},
+                            }
+                        ],
+                    }
+                ),
+                {"errcode": 0, "errmsg": "ok"},
+            ]
+        )
+        first = upsert_draft(
+            title=title,
+            html="<p>body</p>",
+            thumb_media_id="THUMB",
+            app_id="app",
+            app_secret="secret",
+            session=session,
+        )
+        second = upsert_draft(
+            title=title,
+            html="<p>body</p>",
+            thumb_media_id="THUMB",
+            app_id="app",
+            app_secret="secret",
+            session=session,
+        )
+        self.assertEqual("created", first.action)
+        self.assertEqual("updated", second.action)
+        self.assertEqual("M1", first.media_id)
+        self.assertEqual("M1", second.media_id)
+        self.assertEqual(1, len([u for u in session.urls() if "/draft/add" in u]))
+        self.assertEqual(1, len([u for u in session.urls() if "/draft/update" in u]))
+
     def test_upsert_sends_cover_crop_and_thumb(self):
         session = FakeSession(
             [
@@ -256,7 +376,7 @@ class WeChatDraftTests(unittest.TestCase):
             cover_crop_percent_list=crop,
             session=session,
         )
-        article = session.calls[-1][2]["json"]["articles"][0]
+        article = session.bodies()[-1]["articles"][0]
         self.assertEqual("THUMB", article["thumb_media_id"])
         self.assertEqual(crop, article["cover_info"]["crop_percent_list"])
 
