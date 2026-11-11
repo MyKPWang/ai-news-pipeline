@@ -171,3 +171,26 @@ timed out` even though the refresh succeeded server-side. Current value: **420**
   但可见 URL 文本仍保留。这与历史草稿一致，非丢失。
 - 官方 `draft/add` **没有** `claim_source_type` 字段，AI 生成声明只能在公众号后台编辑器里勾选。
 - 验证草稿：`POST /cgi-bin/draft/get`，再下载 `thumb_url` 与历史封面做 SHA/RGB 比对。
+
+### 上传失败只补传，绝不重跑 Pipeline
+
+发布与内容生产已解耦：HTML 先落盘，再上传；上传失败会被记录为日志并把状态置为 `partial`，
+不会中断采集，也不会重跑 MiniMax 改写。
+
+- **上传幂等**：`src/wechat_draft.py::upsert_draft()` 先用 `draft/batchget` 按标题查同名草稿，
+  存在则 `draft/update` 覆盖，不存在才 `draft/add`。重复执行同一天只会留下一条草稿。
+- **白名单 IP 直接从错误里取**：`errcode 40164` 的 errmsg 里带微信看到的出口 IP，
+  `WeChatIpNotWhitelistedError.ip` 会把它解析出来，日报日志和补传脚本都会打印这个 IP。
+- **IP 变了由你手工处理**：在 微信公众平台 → 设置与开发 → 基本配置 → IP白名单 里加上脚本打印的 IP，
+  然后重新执行补传命令即可。**不要**改 FlClash / Clash 规则或代理设置，也不要加自动重试的定时任务。
+
+```bash
+cd ~/Developer/ai-news-pipeline
+.venv/bin/python scripts/macos/republish_draft.py --date 20261111          # 补传指定日期
+.venv/bin/python scripts/macos/republish_draft.py                          # 补传最新一份 HTML
+.venv/bin/python scripts/macos/republish_draft.py --date 20261111 --dry-run # 只检查，不调 API
+```
+
+脚本只读 `wechat-publish-tool/output/news_YYYYMMDD.html`，不重新采集、不重新摘要、
+不调用 MiniMax。成功时打印 `action`（`created`/`updated`）和 `media_id`；
+被白名单拒绝时打印 IP 与三步操作提示并以退出码 **2** 结束。

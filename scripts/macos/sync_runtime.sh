@@ -43,6 +43,7 @@ sync_file() {
 sync_dir "$DEV_PIPELINE/src" "$PIPELINE_HOME/src"
 sync_dir "$DEV_PIPELINE/scripts" "$PIPELINE_HOME/scripts"
 sync_dir "$DEV_PIPELINE/tests" "$PIPELINE_HOME/tests"
+sync_dir "$DEV_PIPELINE/docs" "$PIPELINE_HOME/docs"
 sync_file "$DEV_PIPELINE/config.yaml" "$PIPELINE_HOME/config.yaml"
 sync_file "$DEV_PIPELINE/secrets.yaml" "$PIPELINE_HOME/secrets.yaml"
 sync_file "$DEV_PIPELINE/README.md" "$PIPELINE_HOME/README.md"
