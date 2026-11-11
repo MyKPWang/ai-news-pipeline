@@ -2,7 +2,16 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 from pathlib import Path
+
+from .wechat_draft import (
+    WeChatApiError,
+    WeChatIpNotWhitelistedError,
+    upsert_draft,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def render_wechat_html(
@@ -31,12 +40,67 @@ def publish_to_wechat_tool(
     sources: list[str],
     config: dict,
 ) -> bool:
+    """Publish the report to the WeChat draft box.
+
+    The upload is idempotent: a draft that already carries ``title`` is
+    updated in place instead of a second copy being created, so re-running
+    the publish step never leaves duplicates behind.
+
+    A publish failure never propagates. The rendered HTML is already on disk,
+    so the content is not lost and only the upload has to be retried.
+    """
     tool_dir = Path("wechat-publish-tool")
-    module = _load_publish_module(tool_dir)
-    _write_tool_config(tool_dir, config)
-    author = config.get("wechat_publish", {}).get("author", "Valkyrie")
-    compliance_contact = config.get("compliance", {}).get("contact", "")
-    return bool(module.publish_news(data, title, sources=sources, author=author, compliance_contact=compliance_contact))
+    try:
+        module = _load_publish_module(tool_dir)
+        _write_tool_config(tool_dir, config)
+        author = config.get("wechat_publish", {}).get("author", "Valkyrie")
+        compliance_contact = config.get("compliance", {}).get("contact", "")
+
+        html_content = module.generate_html(
+            data,
+            title,
+            sources=sources,
+            author=author,
+            compliance_contact=compliance_contact,
+        )
+        module.save_html(html_content, title)
+        html_content, fixed_links = module.normalize_wechat_links(html_content)
+        if fixed_links:
+            logger.info("Normalized %d WeChat short link(s) (~ -> _)", fixed_links)
+
+        tool_config = module.get_config()
+        thumb_media_id = module.ensure_thumb_media_id(tool_config)
+
+        result = upsert_draft(
+            title=title,
+            html=html_content,
+            thumb_media_id=thumb_media_id,
+            app_id=tool_config["app_id"],
+            app_secret=tool_config["app_secret"],
+            author=author,
+            cover_crop_percent_list=module.COVER_CROP_PERCENT_LIST,
+        )
+        logger.info(
+            "WeChat draft %s: media_id=%s title=%s",
+            result.action,
+            result.media_id,
+            title,
+        )
+        return True
+    except WeChatIpNotWhitelistedError as exc:
+        logger.error(
+            "WeChat rejected the upload: the current egress IP %s is not in the "
+            "account IP whitelist. Add it under 设置与开发 -> 基本配置 -> IP白名单, "
+            "then retry the upload only; the HTML is already generated.",
+            exc.ip or "unknown",
+        )
+        return False
+    except WeChatApiError as exc:
+        logger.error("WeChat draft upload failed: %s", exc)
+        return False
+    except Exception as exc:  # pragma: no cover - defensive, publish must not break the run
+        logger.error("WeChat draft upload failed unexpectedly: %s", exc)
+        return False
 
 
 def _load_publish_module(tool_dir: Path):

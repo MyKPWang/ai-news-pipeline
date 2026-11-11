@@ -197,6 +197,18 @@ def run_pipeline(config: dict, no_publish: bool = False, *, refresh_sources: boo
             logger.info("[PUBLISH_DEBUG] categories=%s",
                          [{"name": c["name"], "count": len(c["items"])} for c in data.get("categories", [])])
             published = publish_to_wechat_tool(data, title, sources, config)
+            if not published:
+                # The report content is complete and the HTML is on disk; only the
+                # upload failed. Publishing is decoupled from content generation, so
+                # the fix is to whitelist the current egress IP in the WeChat admin
+                # console and re-run the upload alone -- never the whole pipeline.
+                logger.error(
+                    "WeChat upload failed but the report HTML is ready: %s\n"
+                    "  Retry the upload only (no re-collection, no MiniMax rewrite):\n"
+                    "    .venv/bin/python scripts/macos/republish_draft.py --date %s",
+                    html_path,
+                    run_date,
+                )
 
         review_path = export_outputs(config, storage, run_id, run_date, raw_items, publishable_items, review_items)
         status = "success" if published or no_publish else "partial"

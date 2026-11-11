@@ -46,6 +46,16 @@ sync_dir "$DEV_PIPELINE/tests" "$PIPELINE_HOME/tests"
 sync_file "$DEV_PIPELINE/config.yaml" "$PIPELINE_HOME/config.yaml"
 sync_file "$DEV_PIPELINE/secrets.yaml" "$PIPELINE_HOME/secrets.yaml"
 sync_file "$DEV_PIPELINE/README.md" "$PIPELINE_HOME/README.md"
+
+# The WeChat draft writer lives in wechat-publish-tool/. Its news-config.json
+# holds the live app credentials and is rewritten by the publisher at runtime,
+# so only the code and the assets are synced.
+mkdir -p "$PIPELINE_HOME/wechat-publish-tool"
+rsync -a --delete \
+  --exclude='news-config.json' --exclude='output' --exclude='__pycache__' \
+  --exclude='.git.vendor' --exclude='.DS_Store' \
+  "$DEV_PIPELINE/wechat-publish-tool/" "$PIPELINE_HOME/wechat-publish-tool/"
+
 # The launchd runtime copy must keep every wrapper script executable; launchd
 # refuses to spawn a job whose script is not marked executable.
 for script in "$PIPELINE_HOME"/scripts/macos/*.sh; do

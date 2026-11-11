@@ -22,6 +22,7 @@ models/
 
 .latest_github_data.json
 .latest_review_run.json
+_review_runs.json
 
 deploy/macos/local-machine.env
 
