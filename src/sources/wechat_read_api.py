@@ -120,7 +120,12 @@ class WechatReadApiSource(Source):
             title=str(record.get("title") or "").strip(),
             desc=str(record.get("digest") or "").strip(),
             source=str(account.get("name") or "微信公众号"),
-            source_type="wechat",
+            # The downstream pipeline keys the WeChat channel on the literal
+            # "wechat_mp" (prompt labelling, source-priority sort, summary
+            # length limit, long-copy threshold). Emitting "wechat" here made
+            # every WeChat article look like a plain web page to the LLM and
+            # lost every tie-break against the duplicate web copy.
+            source_type="wechat_mp",
             url=str(record.get("url") or "").strip(),
             publish_time=publish_time,
             time_text=format_time_text(publish_time) if publish_time else "",
