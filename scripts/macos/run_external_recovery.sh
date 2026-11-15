@@ -52,8 +52,10 @@ mkdir -p "$(dirname "$SEEDS")"
 cd "$COLLECTOR_HOME"
 
 # 第一步：发现种子。
+# --max-pages 2000：候选条目页有 960 个左右（14 天归档 + 24 个检索词），
+# 默认的 600 会漏掉三分之一的候选页，实测漏掉的页里还有 51 条永久链接。
 echo "[external-recovery] 采集外部永久链接种子" >&2
-if ! "$COLLECTOR_PY" "$HARVEST" --out "$SEEDS" --days 14; then
+if ! "$COLLECTOR_PY" "$HARVEST" --out "$SEEDS" --days 14 --max-pages 2000; then
   echo "[external-recovery] 种子采集失败；沿用上一份种子继续补采" >&2
   if [ ! -f "$SEEDS" ]; then
     exit 1
