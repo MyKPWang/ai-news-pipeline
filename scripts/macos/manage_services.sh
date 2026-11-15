@@ -7,7 +7,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 COMMAND=${1:-status}
 USER_ID=$(id -u)
 AGENT_DIR="$HOME/Library/LaunchAgents"
-LABELS="com.wangkp.ai-news.collector-api com.wangkp.ai-news.collector-refresh com.wangkp.ai-news.console com.wangkp.ai-news.daily-report"
+LABELS="com.wangkp.ai-news.collector-api com.wangkp.ai-news.collector-refresh com.wangkp.ai-news.external-recovery com.wangkp.ai-news.recovery com.wangkp.ai-news.console com.wangkp.ai-news.daily-report"
 
 require_launchd_access() {
   for path in "$PIPELINE_HOME" "$COLLECTOR_HOME"; do
