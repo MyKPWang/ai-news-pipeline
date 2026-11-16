@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -22,10 +23,20 @@ class LlmError(RuntimeError):
 
 
 class LlmResponseError(LlmError):
-    def __init__(self, reason_code: str, message: str, *, response_metadata: dict[str, Any] | None = None):
+    def __init__(
+        self,
+        reason_code: str,
+        message: str,
+        *,
+        response_metadata: dict[str, Any] | None = None,
+        retryable: bool = False,
+    ):
         super().__init__(message)
         self.reason_code = reason_code
         self.response_metadata = response_metadata or {}
+        # retryable errors (peak-hour 529, 5xx, gateway errors) are worth
+        # another endpoint or another attempt; content/param errors are not.
+        self.retryable = retryable
 
 
 class MiniMaxClient:
@@ -37,6 +48,19 @@ class MiniMaxClient:
         self.api_key = self.api_config.get("api_key", "")
         self.model = self.api_config.get("model", "MiniMax-M2.7")
         self.base_url = str(self.api_config.get("base_url", "https://api.minimax.chat/v1")).rstrip("/")
+        # MiniMax serves the same models on more than one endpoint. The primary
+        # one intermittently answers HTTP 529 (overloaded_error) during peak
+        # hours, so the client falls back to the next endpoint instead of
+        # failing the whole run.
+        self.endpoints = [
+            str(item).strip()
+            for item in (self.api_config.get("endpoints") or ["/text/chatcompletion_v2"])
+            if str(item).strip()
+        ]
+        self.connect_timeout = float(self.api_config.get("connect_timeout_seconds", 30))
+        self.read_timeout = float(
+            self.api_config.get("read_timeout_seconds", self.api_config.get("timeout_seconds", 180))
+        )
         self.llm_log_path = get_llm_log_path(config)
         self._last_response_metadata: dict[str, Any] = {}
 
@@ -208,7 +232,7 @@ class MiniMaxClient:
                     reason_code=reason_code,
                 )
                 if attempt < int(self.api_config.get("max_retries", 3)) - 1:
-                    time.sleep(2**attempt)
+                    time.sleep(self._retry_backoff(attempt))
                 else:
                     self.storage.add_llm_call(
                         run_id=self.run_id,
@@ -227,8 +251,72 @@ class MiniMaxClient:
 
         raise LlmError(last_error or "unknown LLM error")
 
+    def _retry_backoff(self, attempt: int) -> float:
+        """Exponential backoff with a hard ceiling.
+
+        The previous unbounded 2**attempt let a single stalled MiniMax request
+        hold the daily job for hours.
+        """
+        base = float(self.api_config.get("retry_backoff_seconds", 5))
+        cap = float(self.api_config.get("retry_backoff_max_seconds", 60))
+        return min(base * (2 ** attempt), cap)
+
+    def _connect_timeout(self) -> float:
+        value = getattr(self, "connect_timeout", None)
+        if value is None:
+            value = float(self.api_config.get("connect_timeout_seconds", 30))
+        return float(value)
+
+    def _read_timeout(self) -> float:
+        value = getattr(self, "read_timeout", None)
+        if value is None:
+            value = float(
+                self.api_config.get("read_timeout_seconds", self.api_config.get("timeout_seconds", 180))
+            )
+        return float(value)
+
+    def _endpoints(self) -> list[str]:
+        """Configured endpoints, with the default when the attribute is absent.
+
+        The client is also constructed directly in tests, so the endpoint list
+        is resolved lazily instead of only in __init__.
+        """
+        endpoints = getattr(self, "endpoints", None)
+        if not endpoints:
+            endpoints = [
+                str(item).strip()
+                for item in (self.api_config.get("endpoints") or ["/text/chatcompletion_v2"])
+                if str(item).strip()
+            ]
+        return list(endpoints)
+
     def _post(self, payload: dict[str, Any]) -> str:
-        url = f"{self.base_url}/text/chatcompletion_v2"
+        """Send one request, falling back across the configured endpoints.
+
+        A 429/5xx/529 from one endpoint is a server-side condition, so the
+        request is retried on the next endpoint with the same model. Content
+        and parameter errors are raised immediately.
+        """
+        last_error: Exception | None = None
+        for endpoint in self._endpoints():
+            try:
+                return self._post_to_endpoint(endpoint, payload)
+            except LlmResponseError as exc:
+                if not exc.retryable:
+                    raise
+                last_error = exc
+                logger.warning(
+                    "MiniMax endpoint failed endpoint=%s reason=%s error=%s",
+                    endpoint,
+                    exc.reason_code,
+                    exc,
+                )
+        if last_error is not None:
+            raise last_error
+        raise LlmError("no MiniMax endpoint configured")
+
+    def _post_to_endpoint(self, endpoint: str, payload: dict[str, Any]) -> str:
+        url = f"{self.base_url}{endpoint}"
         resp = requests.post(
             url,
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -236,38 +324,62 @@ class MiniMaxClient:
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.api_key}",
             },
-            timeout=int(self.api_config.get("timeout_seconds", 120)),
+            timeout=(self._connect_timeout(), self._read_timeout()),
         )
+        self._last_response_metadata = {
+            "http_status": resp.status_code,
+            "endpoint": endpoint,
+            "request_id": resp.headers.get("x-request-id") or resp.headers.get("request-id") or "",
+        }
+        if resp.status_code >= 500 or resp.status_code in (429, 529):
+            body = getattr(resp, "text", "") or ""
+            raise LlmResponseError(
+                f"LLM_HTTP_{resp.status_code}",
+                f"MiniMax HTTP {resp.status_code} from {endpoint}: {body[:400]}",
+                response_metadata=dict(self._last_response_metadata),
+                retryable=True,
+            )
         resp.raise_for_status()
         data = resp.json()
         choices = data.get("choices") if isinstance(data, dict) else None
         first_choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
-        self._last_response_metadata = {
-            "http_status": resp.status_code,
-            "request_id": resp.headers.get("x-request-id") or resp.headers.get("request-id") or "",
-            "choice_count": len(choices) if isinstance(choices, list) else 0,
-            "finish_reason": str(first_choice.get("finish_reason") or ""),
-            "response_keys": sorted(str(key) for key in data.keys()) if isinstance(data, dict) else [],
-        }
+        self._last_response_metadata.update(
+            {
+                "choice_count": len(choices) if isinstance(choices, list) else 0,
+                "finish_reason": str(first_choice.get("finish_reason") or ""),
+                "response_keys": sorted(str(key) for key in data.keys()) if isinstance(data, dict) else [],
+            }
+        )
+        base_resp = data.get("base_resp") if isinstance(data, dict) else None
+        if isinstance(base_resp, dict) and base_resp.get("status_code"):
+            code = int(base_resp.get("status_code") or 0)
+            message = str(base_resp.get("status_msg") or "")
+            raise LlmResponseError(
+                f"LLM_BASE_RESP_{code}",
+                f"MiniMax base_resp {code}: {message}",
+                response_metadata=dict(self._last_response_metadata),
+                retryable=True,
+            )
         if first_choice:
             message = first_choice.get("message") if isinstance(first_choice.get("message"), dict) else {}
-            content = str(message.get("content") or "").strip()
+            content = strip_reasoning(str(message.get("content") or "").strip())
             self._last_response_metadata["content_length"] = len(content)
             if content:
                 return content
             raise LlmResponseError(
                 "EMPTY_CHOICE_CONTENT",
                 "MiniMax returned an empty choice content",
-                response_metadata=self._last_response_metadata,
+                response_metadata=dict(self._last_response_metadata),
             )
         reply = str(data.get("reply") or "").strip() if isinstance(data, dict) else ""
+        reply = strip_reasoning(reply)
         self._last_response_metadata["content_length"] = len(reply)
         if reply:
             return reply
         raise LlmResponseError(
             "UNEXPECTED_RESPONSE_SHAPE",
             "MiniMax response has no usable choice content",
-            response_metadata=self._last_response_metadata,
+            response_metadata=dict(self._last_response_metadata),
         )
 
     def _write_llm_log(
@@ -303,10 +415,23 @@ class MiniMaxClient:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
+def strip_reasoning(text: str) -> str:
+    """Remove the <think> reasoning blocks some endpoints inline in content."""
+    if not text:
+        return ""
+    cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
+    if "<think>" in cleaned:
+        cleaned = cleaned.split("<think>", 1)[0]
+    return cleaned.strip()
+
+
 def parse_json_response(text: str) -> dict[str, Any]:
     text = (text or "").strip()
     if not text:
         raise ValueError("empty LLM response")
+    fenced = re.search(r"```(?:json)?\s*(.*?)```", text, flags=re.S)
+    if fenced and fenced.group(1).strip():
+        text = fenced.group(1).strip()
     try:
         parsed = json.loads(text)
     except json.JSONDecodeError:

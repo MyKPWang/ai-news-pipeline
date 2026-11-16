@@ -52,6 +52,51 @@ class MiniMaxRuntimeResilienceTests(unittest.TestCase):
         self.assertEqual("request-1", raised.exception.response_metadata["request_id"])
         self.assertEqual(0, raised.exception.response_metadata["content_length"])
 
+    def test_endpoint_fallback_is_used_when_the_primary_endpoint_is_overloaded(self) -> None:
+        client = MiniMaxClient.__new__(MiniMaxClient)
+        client.api_key = "test-key"
+        client.api_config = {"max_retries": 1, "endpoints": ["/text/chatcompletion_v2", "/chat/completions"]}
+        client.model = "test-model"
+        client.run_id = 1
+        client.llm_log_path = "tests/fixtures/llm.jsonl"
+        client._last_response_metadata = {}
+        client.storage = types.SimpleNamespace(add_llm_call=lambda **_kwargs: None)
+        client._write_llm_log = types.MethodType(
+            lambda _self, *args, **kwargs: None, client
+        )
+
+        seen: list[str] = []
+
+        def post_once(_self, _payload):
+            seen.append("called")
+            raise LlmResponseError(
+                "LLM_HTTP_529",
+                "overloaded",
+                response_metadata={"http_status": 529},
+                retryable=True,
+            )
+
+        client._post_to_endpoint = types.MethodType(post_once, client)
+
+        def fake_post_to_endpoint(_self, endpoint, payload):
+            seen.append(endpoint)
+            if endpoint == "/text/chatcompletion_v2":
+                raise LlmResponseError(
+                    "LLM_HTTP_529",
+                    "overloaded",
+                    response_metadata={"http_status": 529},
+                    retryable=True,
+                )
+            return '{"ok": true}'
+
+        client._post_to_endpoint = types.MethodType(fake_post_to_endpoint, client)
+
+        with patch("src.llm.minimax.time.sleep"):
+            result = client._call_json("rewrite", "prompt", ["item-1"], 0.4, 100)
+
+        self.assertEqual({"ok": True}, result)
+        self.assertEqual(["/text/chatcompletion_v2", "/chat/completions"], seen)
+
     def test_empty_choice_content_is_retried(self) -> None:
         client = MiniMaxClient.__new__(MiniMaxClient)
         client.api_key = "test-key"

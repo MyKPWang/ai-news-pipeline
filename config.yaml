@@ -18,8 +18,18 @@ wechat_read_api:
 minimax_api:
   model: "MiniMax-M2.7"
   base_url: "https://api.minimax.chat/v1"
+  # The primary endpoint intermittently returns HTTP 529 overloaded_error
+  # during peak hours. The OpenAI-compatible endpoint serves the same model
+  # and is used as the automatic fallback.
+  endpoints:
+    - "/text/chatcompletion_v2"
+    - "/chat/completions"
+  connect_timeout_seconds: 30
+  read_timeout_seconds: 180
   timeout_seconds: 300
-  max_retries: 3
+  max_retries: 4
+  retry_backoff_seconds: 5
+  retry_backoff_max_seconds: 60
   selection_temperature: 0.2
   rewrite_temperature: 0.4
   selection_batch_size: 40
