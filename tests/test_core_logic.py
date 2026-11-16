@@ -19,7 +19,6 @@ from src.llm.prompts import build_global_selection_prompt, build_rewrite_prompt
 from src.models import NewsItem
 from src.pipeline import run_pipeline, sort_by_source_priority, validate_rewritten
 from src.publisher import render_wechat_html
-from src.sources.portals import HuxiuPortal
 from src.time_utils import parse_time_value
 
 
@@ -45,75 +44,6 @@ class TimeParsingTest(unittest.TestCase):
             int(datetime(2026, 5, 24, 9, 30).timestamp()),
             parse_time_value("2026-05-24 09:30", now),
         )
-
-
-class HuxiuPortalTest(unittest.TestCase):
-    SITE_CONFIG = {
-        "name": "huxiu",
-        "list_url": "https://www.huxiu.com/ainews/",
-    }
-
-    @staticmethod
-    def normal_html() -> str:
-        nuxt_data = [
-            {"aiNewsList": 1, "ainews_id": 2},
-            [3],
-            {"ainews_id": 4},
-            {"ainews_id": 5, "title": 6, "desc": 7, "publish_time": 8},
-            "10001",
-            "10001",
-            "虎嗅测试标题",
-            "虎嗅测试摘要",
-            1785253995000,
-        ]
-        return f'<script id="__NUXT_DATA__" type="application/json">{json.dumps(nuxt_data)}</script>'
-
-    def test_collect_uses_stealth_mode_by_default_and_parses_items(self):
-        portal = HuxiuPortal(self.SITE_CONFIG, {})
-        with patch.object(portal, "_fetch_html_with_stealth", return_value=self.normal_html()) as stealth_fetch:
-            with patch.object(portal, "_fetch_html_with_persistent_chrome") as chrome_fetch:
-                items = portal.collect()
-
-        stealth_fetch.assert_called_once()
-        chrome_fetch.assert_not_called()
-        self.assertEqual(1, len(items))
-        self.assertEqual("虎嗅测试标题", items[0].title)
-        self.assertEqual("https://www.huxiu.com/ainews/10001.html", items[0].url)
-
-    def test_collect_retries_with_persistent_chrome_after_waf_when_enabled(self):
-        portal = HuxiuPortal(
-            self.SITE_CONFIG,
-            {
-                "portal_browser": {
-                    "huxiu": {
-                        "mode": "stealth",
-                        "fallback_to_persistent_chrome": True,
-                    }
-                }
-            },
-        )
-        waf_html = "<title>Verification</title><meta name=\"aliyun_waf_aa\">"
-        with patch.object(portal, "_fetch_html_with_stealth", return_value=waf_html) as stealth_fetch:
-            with patch.object(
-                portal,
-                "_fetch_html_with_persistent_chrome",
-                return_value=self.normal_html(),
-            ) as chrome_fetch:
-                items = portal.collect()
-
-        stealth_fetch.assert_called_once()
-        chrome_fetch.assert_called_once()
-        self.assertEqual(1, len(items))
-
-    def test_collect_returns_empty_with_clear_waf_log_when_fallback_disabled(self):
-        portal = HuxiuPortal(self.SITE_CONFIG, {})
-        waf_html = "<title>Verification</title><meta name=\"aliyun_waf_aa\">"
-        with patch.object(portal, "_fetch_html_with_stealth", return_value=waf_html):
-            with self.assertLogs("src.sources.portals", level="WARNING") as logs:
-                items = portal.collect()
-
-        self.assertEqual([], items)
-        self.assertTrue(any("aliyun_waf" in line for line in logs.output))
 
 
 class FilterAndDedupTest(unittest.TestCase):
@@ -269,8 +199,8 @@ class LlmLogicTest(unittest.TestCase):
 
     def test_selection_prompt_includes_source_priority_and_duplicate_policy(self):
         wechat = NewsItem(title="系统级 AI 能力发布", desc="官方公众号发布。", source_type="wechat_mp")
-        portal = NewsItem(title="系统级 AI 能力发布", desc="网页报道同一事件。", source_type="portal")
-        prompt = build_global_selection_prompt([wechat, portal])
+        web = NewsItem(title="系统级 AI 能力发布", desc="网页报道同一事件。", source_type="public_list")
+        prompt = build_global_selection_prompt([wechat, web])
 
         payload = wechat.text_for_llm_selection(1)
         self.assertEqual("公众号", payload["source_type"])
@@ -280,7 +210,7 @@ class LlmLogicTest(unittest.TestCase):
         self.assertIn("只选择 1 条", prompt)
 
     def test_selection_prompt_rejects_financing_main_events(self):
-        item = NewsItem(title="AI公司完成B轮融资", desc="投资方包括多家科技基金。", source_type="portal")
+        item = NewsItem(title="AI公司完成B轮融资", desc="投资方包括多家科技基金。", source_type="public_list")
         prompt = build_global_selection_prompt([item])
 
         self.assertIn("融资、IPO、估值、股价、普通投资事件不得因涉及 AI 公司而入选", prompt)
@@ -490,20 +420,20 @@ class RewriteAndAggregationTest(unittest.TestCase):
             rewritten_title="苹果系统 AI 能力更新",
             summary=f"{repeated}，更多细节可查看原文。",
         )
-        portal = NewsItem(
+        web = NewsItem(
             title=repeated,
             desc="",
-            source_type="portal",
+            source_type="public_list",
             rewritten_title="苹果系统 AI 能力更新",
             summary=f"{repeated}，更多细节可查看原文。",
         )
 
-        publishable, review = validate_rewritten([wechat, portal], copy_threshold=50)
+        publishable, review = validate_rewritten([wechat, web], copy_threshold=50)
 
-        self.assertEqual([portal], publishable)
+        self.assertEqual([web], publishable)
         self.assertEqual([wechat], review)
         self.assertIn("possible_copying", wechat.risk_flags)
-        self.assertNotIn("possible_copying", portal.risk_flags)
+        self.assertNotIn("possible_copying", web.risk_flags)
 
     def test_validate_rewritten_limits_guided_brief_lengths_by_source_type(self):
         wechat = NewsItem(
@@ -512,9 +442,9 @@ class RewriteAndAggregationTest(unittest.TestCase):
             rewritten_title="微信来源改写标题",
             summary="微" * 91,
         )
-        portal = NewsItem(
+        web = NewsItem(
             title="门户来源标题",
-            source_type="portal",
+            source_type="public_list",
             rewritten_title="门户来源改写标题",
             summary="门" * 121,
         )
@@ -525,12 +455,12 @@ class RewriteAndAggregationTest(unittest.TestCase):
             summary="合" * 80,
         )
 
-        publishable, review = validate_rewritten([wechat, portal, ok])
+        publishable, review = validate_rewritten([wechat, web, ok])
 
         self.assertEqual([ok], publishable)
-        self.assertEqual([wechat, portal], review)
+        self.assertEqual([wechat, web], review)
         self.assertIn("summary_too_long", wechat.risk_flags)
-        self.assertIn("summary_too_long", portal.risk_flags)
+        self.assertIn("summary_too_long", web.risk_flags)
 
     def test_wechat_html_does_not_fallback_to_original_title_or_desc(self):
         item = NewsItem(
@@ -619,7 +549,7 @@ class RewriteAndAggregationTest(unittest.TestCase):
 
 class MockPipelineTest(unittest.TestCase):
     def test_source_priority_sort_prefers_wechat_after_filtering(self):
-        portal = NewsItem(title="同一事件", desc="网页摘要更短", source_type="portal", url="https://p")
+        web = NewsItem(title="同一事件", desc="网页摘要更短", source_type="public_list", url="https://p")
         wechat = NewsItem(
             title="同一事件",
             desc="公众号摘要",
@@ -628,9 +558,9 @@ class MockPipelineTest(unittest.TestCase):
             url="https://w",
         )
 
-        sorted_items = sort_by_source_priority([portal, wechat])
+        sorted_items = sort_by_source_priority([web, wechat])
 
-        self.assertEqual([wechat, portal], sorted_items)
+        self.assertEqual([wechat, web], sorted_items)
 
     def test_end_to_end_pipeline_with_mock_sources_and_llm(self):
         now_ts = int(datetime.now().timestamp())
@@ -639,7 +569,7 @@ class MockPipelineTest(unittest.TestCase):
                 title="千问开放第三方厂商接入指南",
                 desc="超级 App + AI 生态更新",
                 source="测试源",
-                source_type="portal",
+                source_type="public_list",
                 url="https://example.com/1",
                 publish_time=now_ts,
             ),
@@ -647,7 +577,7 @@ class MockPipelineTest(unittest.TestCase):
                 title="某公司招聘 AI 工程师",
                 desc="岗位招聘信息",
                 source="测试源",
-                source_type="portal",
+                source_type="public_list",
                 url="https://example.com/2",
                 publish_time=now_ts,
             ),

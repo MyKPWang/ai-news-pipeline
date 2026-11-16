@@ -55,9 +55,7 @@ macOS TCC 限制 launchd 后台进程读取 `~/Documents`，所以**必须**分�
 │   │   ├── sources/                     # 数据源适配器
 │   │   │   ├── base.py
 │   │   │   ├── public_source_api.py     # 公开源 → Collector API
-│   │   │   ├── wechat_read_api.py       # 微信文章 → Collector API
-│   │   │   ├── portals.py               # 门户型站点
-│   │   │   └── github.py
+│   │   │   └── wechat_read_api.py       # 微信文章 → Collector API
 │   │   ├── interceptors/                # 过滤器
 │   │   │   ├── dedup.py                 # 精确去重
 │   │   │   ├── bge_dedup.py             # BGE 语义去重

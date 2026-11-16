@@ -80,7 +80,7 @@ python3 -m unittest discover -s tests
 - 公众号 HTML：`wechat-publish-tool/output/news_*.html`
 - Collector SQLite 与来源审计：`public-source-collector/data/collector.db`
 
-仓库中的旧 Docker 微信 API、门户直抓、扫码授权与对应 smoke 脚本仅为历史代码，不属于当前生产链路。
+旧 Docker 微信 API、门户直抓、扫码授权与对应 smoke 脚本已从仓库删除；公开源与微信文章的采集全部由 `public-source-collector` 承担。
 # 资讯日报 Pipeline
 
 ## 本机控制台（第一版）

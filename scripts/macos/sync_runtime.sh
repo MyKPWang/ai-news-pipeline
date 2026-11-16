@@ -47,6 +47,8 @@ sync_dir "$DEV_PIPELINE/docs" "$PIPELINE_HOME/docs"
 sync_file "$DEV_PIPELINE/config.yaml" "$PIPELINE_HOME/config.yaml"
 sync_file "$DEV_PIPELINE/secrets.yaml" "$PIPELINE_HOME/secrets.yaml"
 sync_file "$DEV_PIPELINE/README.md" "$PIPELINE_HOME/README.md"
+sync_file "$DEV_PIPELINE/requirements.txt" "$PIPELINE_HOME/requirements.txt"
+sync_file "$DEV_PIPELINE/SPEC.md" "$PIPELINE_HOME/SPEC.md"
 
 # launchd job definitions. manage_services.sh copies these into ~/Library/LaunchAgents.
 # Only the .plist files are synced: local-machine.env holds the live app

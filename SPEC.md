@@ -1,5 +1,13 @@
 # AI 资讯采集与公众号推送系统 - 设计规格文档
 
+> **文档状态：历史存档（一期设计草案，v0.7 / 2026-05）。**
+> 现行生产架构已改为「public-source-collector（采集层）+ ai-news-pipeline（加工发布层）」双仓架构，
+> 权威架构说明见 [docs/SYSTEM_ARCHITECTURE.md](docs/SYSTEM_ARCHITECTURE.md)，部署与运维见 [docs/LOCAL_MACOS_RUNBOOK.md](docs/LOCAL_MACOS_RUNBOOK.md)。
+> 2026-11-16 起，本文档第 2、3 节描述的微信公众号 Docker API（we-mp-rss）与 Playwright 门户直抓实现已从代码库删除
+> （对应 `src/sources/wechat.py`、`src/sources/portals.py`、`scripts/portal_smoke.py`、`scripts/wechat_api_test.py`、`tests/test_wechat_source_mock.py`），
+> 对应能力改由 `public-source-collector` 的微信读书通道与公开源适配器提供。
+> 本文档第 6、7、8、10 节已同步为当前代码事实；第 2、3、9 节保留为历史设计记录。
+
 ## 1. 项目概述
 
 **项目名称**: AI 资讯采集与公众号推送系统
@@ -989,52 +997,17 @@ data = {
 非敏感配置通过 `config.yaml` 管理，敏感密钥通过单独的 `secrets.yaml` 管理。`config.example.yaml` 和 `secrets.example.yaml` 可以提交 GitHub，真实 `config.yaml` 和 `secrets.yaml` 不提交。
 
 ```yaml
-# Docker API 配置
-docker_api:
-  # 电脑 A 本机 Docker 采集服务地址
-  base_url: "http://localhost:4000"
-  # access_token 自动刷新，无需手动配置
+# Non-sensitive runtime configuration. Copy to config.yaml for local use.
 
-# 公众号列表（可从 /mps 接口动态获取，也可手动配置）
-wechat_accounts:
-  - name: "千问"
-    mp_id: ""  # 从 /mps 接口获取
-  - name: "豆包"
-    mp_id: ""
-  - name: "DeepSeek"
-    mp_id: ""
-  - name: "华为"
-    mp_id: ""
-  - name: "小米技术"
-    mp_id: "MP_WXS_3510410326"
-  - name: "Apple开发者"
-    mp_id: "MP_WXS_3945721857"
-  - name: "量子位"
-    mp_id: ""
-  - name: "新智元"
-    mp_id: ""
-  - name: "机器之心"
-    mp_id: ""
+# The public-source collector owns website access, source-level retry/degradation,
+# and SQLite cache de-duplication. This Pipeline refreshes it then reads metadata.
+public_source_api:
+  base_url: "http://127.0.0.1:4100"
+  request_timeout_seconds: 180
+  page_size: 500
+  # Empty means all enabled sources. Fill this only for a deliberately scoped run.
+  source_slugs: []
 
-# 门户网站配置（一期 3 个）
-portal_sites:
-  - name: "huxiu"
-    enabled: true
-    list_url: "https://www.huxiu.com/ainews/"
-    max_pages: 1
-    fetch_detail: false
-  - name: "qbitai"
-    enabled: true
-    list_url: "https://www.qbitai.com/category/%E8%B5%84%E8%AE%AF"
-    max_pages: 1
-    fetch_detail: false
-  - name: "aibase"
-    enabled: true
-    list_url: "https://news.aibase.com/zh/news"
-    max_pages: 1
-    fetch_detail: false
-
-# MiniMax API 配置
 minimax_api:
   model: "MiniMax-M2.7"
   base_url: "https://api.minimax.chat/v1"
@@ -1051,24 +1024,28 @@ minimax_api:
   fetch_article_detail_for_rewrite: false
   max_content_chars: 2000
 
-# BGE 模型配置
 bge_model:
-  path: ""     # 优先使用现成模型路径，空白则下载
+  # Download once with: python3 scripts/bootstrap_bge_model.py (ModelScope by default)
+  path: "data/models/bge-small-zh-v1.5"
+  name: "BAAI/bge-small-zh-v1.5"
+  allow_remote_download: false
   threshold: 0.85
+  enabled: true
   force_gc_after_run: true
 
-# 运行配置
 runtime:
-  lookback_hours: 24
+  report_window: "previous_and_current_calendar_day"
   default_no_publish: false
   reuse_rewrite_cache: true
 
-# 公众号推送配置
 wechat_publish:
-  thumb_media_id: ""  # 首次运行自动获取
-  auto_publish: false  # 一期默认只上传草稿/生成公众号同款 HTML，确认稳定后再自动发布
+  thumb_media_id: ""
+  auto_publish: false
+  author: "Valkyrie"
 
-# 输出和安全配置
+compliance:
+  contact: ""
+
 output:
   database_path: "data/news.db"
   save_raw_json: true
@@ -1079,7 +1056,7 @@ output:
   stop_publish_on_llm_error: true
   stop_publish_on_rewrite_warning: true
   require_rewritten_title_and_summary: true
-  copy_check_threshold: 20
+  copy_check_threshold: 50
   max_review_ratio_for_publish: 0.3
   min_publishable_items: 3
 ```
@@ -1087,9 +1064,11 @@ output:
 真实密钥配置文件 `secrets.yaml` 示例：
 
 ```yaml
-docker_api:
-  username: ""
-  password: ""
+# Sensitive local secrets. Copy to secrets.yaml and fill real values.
+# Do not commit secrets.yaml.
+
+public_source_api:
+  token: ""
 
 minimax_api:
   api_key: ""
@@ -1099,7 +1078,7 @@ wechat_publish:
   app_secret: ""
 ```
 
-敏感信息（MiniMax API Key、公众号 app_secret、Docker API 密码）只写入 `secrets.yaml`，避免提交真实密钥到 GitHub。后续开发时可保留环境变量覆盖能力，但默认部署路径以 `secrets.yaml` 为准。
+敏感信息（MiniMax API Key、公众号 app_secret、Collector API Token）只写入 `secrets.yaml`，避免提交真实密钥到 GitHub。Collector API Token 也可通过环境变量 `PUBLIC_SOURCE_API_TOKEN` 提供，macOS 部署包装脚本使用该环境变量。
 
 ## 7. 目录结构
 
@@ -1127,9 +1106,9 @@ ai-news-pipeline/
 │   ├── pipeline.py     # source + interceptor 流水线编排
 │   ├── sources/
 │   │   ├── __init__.py
-│   │   ├── base.py     # 数据源基类
-│   │   ├── wechat.py   # 微信公众号 Docker API 数据源
-│   │   └── portals.py  # 门户网站 Playwright 数据源基类/通用逻辑
+│   │   ├── base.py              # 数据源基类
+│   │   ├── public_source_api.py # 公开源 → Collector API
+│   │   └── wechat_read_api.py   # 微信文章 → Collector API
 │   ├── interceptors/
 │   │   ├── __init__.py
 │   │   ├── keyword_filter.py
@@ -1153,14 +1132,14 @@ ai-news-pipeline/
 ```
 requests
 httpx
+fastapi
+uvicorn
 pyyaml
 jinja2
-beautifulsoup4
-playwright
-playwright-stealth
 numpy
 scikit-learn
 sentence-transformers  # BGE 模型
+modelscope-hub
 ```
 
 SQLite 使用 Python 标准库 `sqlite3`，无需额外安装数据库服务。
@@ -1171,23 +1150,22 @@ SQLite 使用 Python 标准库 `sqlite3`，无需额外安装数据库服务。
 
 ```bash
 python3 -m pip install -r requirements.txt
-python3 -m playwright install chromium
 cp config.example.yaml config.yaml
 cp secrets.example.yaml secrets.yaml
 ```
 
-电脑 A 使用全局 Python 环境运行，不要求创建虚拟环境。本地开发如需隔离依赖，可以自行创建 `.venv`，但生产部署和 OpenClaw 任务示例均以全局 Python 为准。
+Pipeline 自身不启动浏览器：Playwright 与浏览器型公开源适配器属于 `public-source-collector`，由它自己的虚拟环境安装。
 
 然后在 `config.yaml` 中填写：
 
-- 微信公众号 Docker API 本机服务地址，默认 `http://localhost:4000`
+- Collector API 地址，默认 `http://127.0.0.1:4100`
 - MiniMax 模型名，默认 `MiniMax-M2.7`
-- 3 个门户网站配置
+- BGE 模型路径
 - 公众号 `thumb_media_id`
 
 然后在 `secrets.yaml` 中填写：
 
-- 微信公众号 Docker API 用户名、密码
+- Collector API Token
 - MiniMax API Key
 - 公众号 app_id、app_secret
 
@@ -1239,13 +1217,7 @@ python3 -m src.main
 python3 -m unittest discover -s tests
 ```
 
-覆盖范围：时间解析、规则过滤、精确去重、LLM JSON 解析和序号映射、改写合规校验、HTML 原文 fallback 防护、mock pipeline、微信公众号 Docker API 客户端 mock。
-
-真实门户抓取 smoke，用于验证虎嗅、量子位、AIBase 页面结构是否仍与采集代码适配：
-
-```bash
-python3 scripts/portal_smoke.py --strict
-```
+覆盖范围：时间解析、规则过滤、精确去重、LLM JSON 解析和序号映射、改写合规校验、HTML 原文 fallback 防护、mock pipeline、Collector API 列表字段映射。
 
 真实 MiniMax smoke，用于验证 `MiniMax-M2.7` 鉴权、JSON 输出、全局筛选和逐篇改写：
 
@@ -1260,7 +1232,7 @@ python3 scripts/minimax_rich_smoke.py
 python3 -m src.main --no-publish
 ```
 
-该命令会真实读取电脑 A 本机 Docker 微信缓存服务、真实抓取门户网站、真实调用 MiniMax，并生成 SQLite、日志、review JSON 和公众号同款 HTML，但不会上传公众号草稿。
+该命令会真实读取 Collector API 的公开源与微信文章缓存、真实调用 MiniMax，并生成 SQLite、日志、review JSON 和公众号同款 HTML，但不会上传公众号草稿。
 
 ## 9. TODO 清单
 
@@ -1290,9 +1262,9 @@ python3 -m src.main --no-publish
 
 ### 10.1 功能验收
 
-- 能从电脑 A 本机 `http://localhost:4000` 获取微信公众号文章。
-- 微信公众号采集只读取已有缓存，不主动触发 `/mps/update`。
-- 能通过 Playwright 抓取 3 个门户网站，单个网站失败不影响其它来源。
+- 能从 Collector API 获取公开源文章与微信公众号文章。
+- 采集失败或刷新接口整体不可用时终止运行，不发布空报告。
+- 单个来源失败不影响其它来源（由 Collector 记录为 `partial` 并继续）。
 - 所有来源统一完成 24 小时时间过滤。
 - 所有来源数据能统一转换为 `NewsItem`，并写入 SQLite。
 - 能从 SQLite 导出 raw / processed / review JSON 用于调试。
@@ -1318,8 +1290,7 @@ python3 -m src.main --no-publish
 ### 10.3 部署验收
 
 - 新机器 clone 后，按 README 能完成依赖安装。
-- `requirements.txt` 包含 Python 依赖。
-- README 明确写出 `python3 -m playwright install chromium`。
+- `requirements.txt` 包含 Pipeline 自身用到的 Python 依赖。
 - `config.example.yaml` 可直接复制为 `config.yaml`。
 - `.gitignore` 排除 `config.yaml`、`data/`、`output/`、`logs/`、模型缓存和本地虚拟环境。
 
