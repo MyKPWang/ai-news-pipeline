@@ -32,13 +32,10 @@ minimax_api:
   retry_backoff_max_seconds: 60
   selection_temperature: 0.2
   rewrite_temperature: 0.4
-  selection_batch_size: 40
   rewrite_batch_size: 4
   rewrite_batch_size_cap: 4
   selection_max_tokens: 10000
   rewrite_max_tokens: 10000
-  use_content_if_available: true
-  fetch_article_detail_for_rewrite: false
   max_content_chars: 2000
 
 bge_model:
@@ -50,8 +47,6 @@ bge_model:
   force_gc_after_run: true
 
 runtime:
-  # Daily report window: yesterday 00:00 through tomorrow 00:00, Asia/Shanghai.
-  report_window: "previous_and_current_calendar_day"
   default_no_publish: false
   reuse_rewrite_cache: true
 
@@ -61,8 +56,6 @@ wechat_publish:
   author: "Valkyrie"
 
 review_list:
-  feishu_enabled: true
-  feishu_user_id: "ou_5c3a069d031b2ac966bf04bfa6b822e7"
   include_time_filter: false
   include_quality_filter: true
   include_keyword_filter: true
@@ -71,12 +64,8 @@ output:
   database_path: "data/news.db"
   save_raw_json: true
   save_processed_json: true
-  save_html: true
   app_log_path: "logs/app_{date}.log"
   llm_log_path: "logs/llm_{date}.jsonl"
-  stop_publish_on_llm_error: true
-  stop_publish_on_rewrite_warning: true
-  require_rewritten_title_and_summary: true
   copy_check_threshold: 50
   max_review_ratio_for_publish: 5.0
   min_publishable_items: 0

@@ -987,9 +987,9 @@ data = {
 - LLM 完整请求/响应日志输出到 `logs/llm_YYYYMMDD.jsonl`
 - SQLite 中的 `app_logs` 和 `llm_calls` 保存可查询索引、摘要、状态和日志文件路径
 - 改写失败、基础文本规则未通过或需要人工检查的条目输出到 `output/review_YYYYMMDD.json`
-- 若 `stop_publish_on_llm_error=true` 且 LLM 关键步骤失败，只生成公众号同款 HTML，不推送公众号
+- LLM 关键步骤失败时，只生成公众号同款 HTML，不推送公众号
 - 若运行在 LLM 改写阶段被 OpenClaw 或系统 SIGKILL 打断，已通过逐条回调写入 SQLite 的 `rewritten` / `publishable` 条目可在下次运行中复用。`runtime.reuse_rewrite_cache=true` 时，系统会按 `item_id` 查找历史成功改写结果，只把未完成条目重新提交给 LLM。
-- 若 `require_rewritten_title_and_summary=true`，未成功改写的条目不得进入最终公众号 HTML
+- 未成功改写（缺 `rewritten_title`）的条目不得进入最终公众号 HTML
 - 公众号 HTML 模板只能展示 `rewritten_title` 和 `summary`，不得展示 `original_title` 或 `original_desc`
 
 ## 6. 配置管理
@@ -1015,13 +1015,10 @@ minimax_api:
   max_retries: 3
   selection_temperature: 0.2
   rewrite_temperature: 0.4
-  selection_batch_size: 40
   rewrite_batch_size: 4
   rewrite_batch_size_cap: 4
   selection_max_tokens: 5000
   rewrite_max_tokens: 5000
-  use_content_if_available: true
-  fetch_article_detail_for_rewrite: false
   max_content_chars: 2000
 
 bge_model:
@@ -1034,7 +1031,6 @@ bge_model:
   force_gc_after_run: true
 
 runtime:
-  report_window: "previous_and_current_calendar_day"
   default_no_publish: false
   reuse_rewrite_cache: true
 
@@ -1050,12 +1046,8 @@ output:
   database_path: "data/news.db"
   save_raw_json: true
   save_processed_json: true
-  save_html: true
   app_log_path: "logs/app_{date}.log"
   llm_log_path: "logs/llm_{date}.jsonl"
-  stop_publish_on_llm_error: true
-  stop_publish_on_rewrite_warning: true
-  require_rewritten_title_and_summary: true
   copy_check_threshold: 50
   max_review_ratio_for_publish: 0.3
   min_publishable_items: 3

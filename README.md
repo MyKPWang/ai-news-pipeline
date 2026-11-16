@@ -39,7 +39,7 @@ public_source_api:
   source_slugs: [] # 空数组表示所有启用来源
 
 runtime:
-  report_window: "previous_and_current_calendar_day"
+  default_no_publish: false
 ```
 
 `secrets.yaml` 放 MiniMax 与发布凭证。Collector API Token 可放在 `public_source_api.token`，也可使用环境变量 `PUBLIC_SOURCE_API_TOKEN`；macOS 部署包装脚本使用后者，避免在多个配置文件复制 Token。

@@ -6,8 +6,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import requests
-
 from .aggregator import build_article_title, build_publish_data, collect_sources
 from .interceptors.bge_dedup import bge_dedup
 from .interceptors.dedup import exact_dedup
@@ -471,61 +469,6 @@ def _load_global_info_for_run(run_id: int) -> dict | None:
         return None
 
 
-# ---------------------------------------------------------------
-# Feishu review list notification
-# ---------------------------------------------------------------
-
-def _get_feishu_token(app_id: str, app_secret: str, timeout: int = 10) -> str | None:
-    """获取 Feishu 应用_access_token。"""
-    if not app_id or not app_secret:
-        return None
-    try:
-        resp = requests.post(
-            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
-            json={"app_id": app_id, "app_secret": app_secret},
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if data.get("code") == 0:
-            return data.get("tenant_access_token")
-    except Exception as exc:
-        logger.warning("Failed to get Feishu token: %s", exc)
-    return None
-
-
-def _send_feishu_text(user_open_id: str, text: str, token: str, timeout: int = 20) -> bool:
-    """发送富文本消息给指定用户。"""
-    try:
-        resp = requests.post(
-            "https://open.feishu.cn/open-apis/im/v1/messages",
-            params={"receive_id_type": "open_id"},
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "receive_id": user_open_id,
-                "msg_type": "text",
-                "content": json.dumps({"text": text}, ensure_ascii=False),
-            },
-            timeout=timeout,
-        )
-        resp.raise_for_status()
-        return resp.json().get("code") == 0
-    except Exception as exc:
-        logger.warning("Failed to send Feishu message: %s", exc)
-        return False
-
-
-_FILTER_LABELS: dict[str, str] = {
-    "time_filter": "【超时过滤】",
-    "quality_filter": "【质量过滤】",
-    "keyword_filter": "【关键词过滤】",
-    "rewrite_check": "【重写校验】",
-}
-
-
 def _review_run_info_path() -> Path:
     return Path(__file__).parent.parent / "_review_runs.json"
 
@@ -726,34 +669,8 @@ def handle_supplement(
     if not published and not is_dry:
         return False, "推送草稿箱失败（auto_publish=true）"
 
-    # 10. 发飞书通知
-    _notify_supplement_done(config, len(rewritten), title, run_date)
-
     logger.info("Supplement done: added %d items, draft updated", len(rewritten))
     return True, f"已补充 {len(rewritten)} 条文章并更新草稿箱"
-
-
-def _notify_supplement_done(
-    config: dict,
-    added_count: int,
-    title: str,
-    run_date: str,
-) -> None:
-    review_cfg = config.get("review_list", {})
-    if not review_cfg.get("feishu_enabled", False):
-        return
-    secrets = config.get("_secrets", {})
-    feishu_cfg = secrets.get("feishu", {})
-    app_id = str(feishu_cfg.get("app_id", "")).strip()
-    app_secret = str(feishu_cfg.get("app_secret", "")).strip()
-    user_open_id = str(review_cfg.get("feishu_user_id", "")).strip()
-    if not app_id or not app_secret or not user_open_id:
-        return
-
-    text = f"✅ 已补充 {added_count} 条文章，草稿箱已更新。\n\n📄 {title}"
-    token = _get_feishu_token(app_id, app_secret)
-    if token:
-        _send_feishu_text(user_open_id, text, token)
 
 
 def _parse_supplement_numbers(user_input: str) -> list[int]:
