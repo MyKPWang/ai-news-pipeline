@@ -7,7 +7,6 @@ import argparse
 import os
 import socket
 import subprocess
-import sys
 import urllib.request
 from pathlib import Path
 

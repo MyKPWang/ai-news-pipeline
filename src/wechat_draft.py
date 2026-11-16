@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 import requests
 
@@ -361,14 +361,3 @@ def upsert_draft(
         return DraftResult(media_id=media_id, action="updated", title=title)
     media_id = add_draft(token, article, session=session, timeout=timeout)
     return DraftResult(media_id=media_id, action="created", title=title)
-
-
-def iter_draft_titles(drafts: Iterable[Mapping[str, Any]]) -> list[str]:
-    """Helper for diagnostics: every title currently in the draft box."""
-    titles: list[str] = []
-    for item in drafts:
-        for article in ((item.get("content") or {}).get("news_item") or []):
-            title = article.get("title")
-            if title:
-                titles.append(str(title))
-    return titles

@@ -399,60 +399,6 @@ class Storage:
             json.dump([item.to_dict() for item in items], f, ensure_ascii=False, indent=2)
         return str(output)
 
-    def get_review_items_from_processed(
-        self, run_id: int, order_by_source: bool = False
-    ) -> list[NewsItem]:
-        """直接从 processed_items 表查询 stage='review' 的文章（供 supplement 使用）。
-
-        Args:
-            run_id: 要查询的 run ID
-            order_by_source: True 时按 ri.source, ri.id 排序（与通知列表顺序一致），
-                            False 时按 ri.publish_time DESC 排序
-        """
-        order_clause = "ri.source, ri.id" if order_by_source else "ri.publish_time desc"
-        with self.connect() as conn:
-            rows = conn.execute(
-                f"""
-                select
-                    ri.id,
-                    ri.item_id,
-                    ri.title,
-                    ri.source,
-                    ri.url,
-                    ri.desc,
-                    ri.publish_time,
-                    ri.time_text,
-                    ri.extra_json,
-                    pi.selection_reason,
-                    pi.core_fact,
-                    pi.rewritten_title,
-                    pi.summary
-                from processed_items pi
-                join raw_items ri on ri.id = pi.raw_item_id
-                where pi.run_id = ? and pi.stage = 'review'
-                order by {order_clause}
-                """,
-                (run_id,),
-            ).fetchall()
-
-        items: list[NewsItem] = []
-        for row in rows:
-            extra = json.loads(row[8]) if row[8] else {}
-            item = NewsItem(
-                id=str(row[1]),
-                raw_id=row[0],
-                title=row[2] or "",
-                source=row[3] or "",
-                url=row[4] or "",
-                desc=row[5] or "",
-                publish_time=row[6],
-                time_text=row[7] or "",
-                extra=extra,
-            )
-            item.ensure_id()
-            items.append(item)
-        return items
-
     def get_raw_item_by_id(self, raw_id: int) -> NewsItem | None:
         """通过 raw_items 表的主键 ID 获取单条记录。"""
         with self.connect() as conn:
@@ -517,67 +463,6 @@ class Storage:
         )
         item.ensure_id()
         return item
-
-    def get_published_items_for_run(
-        self,
-        run_id: int,
-    ) -> list[NewsItem]:
-        """获取指定 run 的所有 publishable 文章（含 rewrite 后的数据）。"""
-        with self.connect() as conn:
-            rows = conn.execute(
-                """
-                select
-                    ri.item_id,
-                    ri.title,
-                    ri.source,
-                    ri.url,
-                    ri.desc,
-                    ri.publish_time,
-                    ri.time_text,
-                    ri.extra_json,
-                    pi.category,
-                    pi.selection_reason,
-                    pi.core_fact,
-                    pi.rewritten_title,
-                    pi.summary,
-                    pi.risk_flags_json
-                from processed_items pi
-                join raw_items ri on ri.id = pi.raw_item_id
-                where pi.run_id = ?
-                  and pi.stage in ('publishable', 'rewritten')
-                order by pi.updated_at asc
-                """,
-                (run_id,),
-            ).fetchall()
-
-        items: list[NewsItem] = []
-        for row in rows:
-            extra = json.loads(row[7]) or {} if row[7] else {}
-            try:
-                risk_flags = json.loads(row[13] or "[]")
-            except json.JSONDecodeError:
-                risk_flags = []
-            item = NewsItem(
-                id=str(row[0]),
-                title=row[1] or "",
-                source=row[2] or "",
-                url=row[3] or "",
-                desc=row[4] or "",
-                publish_time=row[5],
-                time_text=row[6] or "",
-                extra=extra,
-            )
-            item.ensure_id()
-            item.category = row[8] or ""
-            item.selection_reason = row[9] or ""
-            item.core_fact = row[10] or ""
-            item.rewritten_title = row[11] or ""
-            item.summary = row[12] or ""
-            item.risk_flags = risk_flags if isinstance(risk_flags, list) else []
-            items.append(item)
-        return items
-
-
 
     def get_published_items_for_run(
         self,

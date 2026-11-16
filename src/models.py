@@ -40,14 +40,6 @@ class NewsItem:
         data["risk_flags"] = self.risk_flags or []
         return data
 
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "NewsItem":
-        item = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
-        item.extra = item.extra or {}
-        item.risk_flags = item.risk_flags or []
-        item.ensure_id()
-        return item
-
     def text_for_filter(self) -> str:
         return f"{self.title or ''} {self.desc or ''} {self.content or ''}".strip()
 

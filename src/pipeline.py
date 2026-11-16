@@ -4,7 +4,6 @@ import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
 from zoneinfo import ZoneInfo
 
 import requests
@@ -14,7 +13,6 @@ from .interceptors.bge_dedup import bge_dedup
 from .interceptors.dedup import exact_dedup
 from .interceptors.keyword_filter import keyword_filter
 from .llm.minimax import LlmError, MiniMaxClient
-from .logging_utils import setup_logging
 from .models import NewsItem, PipelineResult
 from .publisher import publish_to_wechat_tool, render_wechat_html
 from .sources.public_source_api import PublicSourceApiError, PublicSourceApiSource
