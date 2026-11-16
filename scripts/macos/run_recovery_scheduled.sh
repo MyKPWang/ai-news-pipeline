@@ -25,6 +25,18 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 . "$SCRIPT_DIR/load_local_env.sh"
 
+# Keep the machine out of idle sleep for the whole job.
+#
+# The laptop is often idle on battery with a very short battery sleep
+# profile, so the job would otherwise be suspended mid-run. `caffeinate -i`
+# prevents *idle* system sleep while this wrapper runs. It cannot prevent a
+# lid-close (clamshell) sleep — that case is out of scope.
+#
+# This must come before the wrapper's first `exec`: `exec` replaces the shell
+# process, so a guard placed after it would never run.
+. "$SCRIPT_DIR/keep_awake.sh"
+keep_awake "$0" "$@"
+
 COLLECTOR_PY="$COLLECTOR_HOME/.venv/bin/python"
 RECOVERY_SCRIPT="$COLLECTOR_HOME/scripts/recover_missing_articles.py"
 
