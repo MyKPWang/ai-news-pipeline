@@ -38,7 +38,10 @@ MAX_ROUNDS=30
 round=1
 processed_total=0
 while [ "$round" -le "$MAX_ROUNDS" ]; do
-  worker_output=$("$WORKER" --config "$CONFIG" worker --once 2>/dev/null) || worker_output=""
+  # 只捕获 stdout 的结果 JSON；stderr 必须原样透出。采集器的结构化日志和
+  # 任何 traceback 都走 stderr，之前这里的 2>/dev/null 把它们全部吞掉，
+  # 结果就是"任务卡死"只能靠猜。stderr 会落到 launchd 的 error log。
+  worker_output=$("$WORKER" --config "$CONFIG" worker --once) || worker_output=""
   # Strip whitespace so the match does not depend on the JSON printer's
   # indentation style.
   worker_flag=$(printf '%s' "$worker_output" | tr -d ' \t\r\n')
